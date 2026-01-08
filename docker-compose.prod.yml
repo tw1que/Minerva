@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: minerva
+      POSTGRES_USER: minerva
+      POSTGRES_PASSWORD: minerva
+    volumes:
+      - minerva_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minerva -d minerva"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: prod
+      DATABASE_URL: postgresql+psycopg://minerva:minerva@db:5432/minerva
+      AUTO_CREATE_DB: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  minerva_db:

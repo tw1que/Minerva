@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Minerva Inventory Forge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Archivo+Black&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__grid"></div>
+      <div class="hero__content">
+        <p class="eyebrow">Minerva // Brutalist Inventory</p>
+        <h1>Inventory Forge</h1>
+        <p class="lead">
+          Define templates, stamp SKUs, track lots, and push stock movements.
+        </p>
+        <div class="pill-row">
+          <span class="pill">FastAPI</span>
+          <span class="pill">Postgres</span>
+          <span class="pill">Docker</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="panel">
+        <h2>Manufacturers</h2>
+        <form class="api-form" data-endpoint="/manufacturers">
+          <label>
+            Name
+            <input type="text" name="name" placeholder="Nova Forge" required />
+          </label>
+          <label>
+            Code
+            <input type="text" name="code" placeholder="NF" required />
+          </label>
+          <button type="submit">Create</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Item Template</h2>
+        <form class="api-form" data-endpoint="/templates">
+          <label>
+            Name
+            <input type="text" name="name" placeholder="Steel Bar" required />
+          </label>
+          <label>
+            Manufacturer ID
+            <input type="number" name="manufacturer_id" placeholder="1" data-number />
+          </label>
+          <label>
+            SKU Prefix
+            <input type="text" name="sku_prefix" placeholder="STB" required />
+          </label>
+          <label>
+            SKU Pattern
+            <input
+              type="text"
+              name="sku_pattern"
+              placeholder="{prefix}-{grade}-{seq:04d}"
+              required
+            />
+          </label>
+          <label>
+            Sequence Scope
+            <select name="seq_scope">
+              <option value="GLOBAL">GLOBAL</option>
+              <option value="PER_TEMPLATE">PER_TEMPLATE</option>
+              <option value="PER_PREFIX">PER_PREFIX</option>
+              <option value="PER_YEAR">PER_YEAR</option>
+            </select>
+          </label>
+          <label>
+            Fields (JSON)
+            <textarea name="fields" data-json data-default="[]" rows="6">
+[
+  {
+    "field_key": "grade",
+    "field_type": "TEXT",
+    "required": true,
+    "include_in_sku": true,
+    "sku_order": 1,
+    "format": "upper"
+  }
+]
+            </textarea>
+          </label>
+          <button type="submit">Create Template</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Create Item</h2>
+        <form class="api-form" data-endpoint="/items">
+          <label>
+            Template ID
+            <input type="number" name="template_id" placeholder="1" data-number required />
+          </label>
+          <label>
+            UoM
+            <input type="text" name="uom" placeholder="kg" required />
+          </label>
+          <label>
+            Track Lots
+            <input type="checkbox" name="track_lots" checked />
+          </label>
+          <label>
+            Attributes (JSON)
+            <textarea name="attributes" data-json data-default="{}" rows="6">
+{
+  "grade": "A"
+}
+            </textarea>
+          </label>
+          <button type="submit">Stamp Item + SKU</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Create Lot</h2>
+        <form class="api-form" data-endpoint="/lots">
+          <label>
+            Item ID
+            <input type="number" name="item_id" placeholder="1" data-number required />
+          </label>
+          <label>
+            Lot Code
+            <input type="text" name="lot_code" placeholder="LOT-2025-01" required />
+          </label>
+          <label>
+            Supplier
+            <input type="text" name="supplier_name" placeholder="Supply Co" />
+          </label>
+          <label>
+            Manufacturing Date
+            <input type="datetime-local" name="manufacturing_date" />
+          </label>
+          <label>
+            Expiry Date
+            <input type="datetime-local" name="expires_at" />
+          </label>
+          <button type="submit">Create Lot</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Stock Movement</h2>
+        <form class="api-form" data-endpoint="/stock/movements">
+          <label>
+            Item ID
+            <input type="number" name="item_id" placeholder="1" data-number required />
+          </label>
+          <label>
+            Lot ID
+            <input type="number" name="lot_id" placeholder="1" data-number />
+          </label>
+          <label>
+            Qty Delta
+            <input type="number" step="0.001" name="qty_delta" placeholder="10" required />
+          </label>
+          <label>
+            UoM
+            <input type="text" name="uom" placeholder="kg" required />
+          </label>
+          <label>
+            Reason
+            <select name="reason">
+              <option value="RECEIPT">RECEIPT</option>
+              <option value="CONSUME">CONSUME</option>
+              <option value="ADJUST">ADJUST</option>
+              <option value="RETURN">RETURN</option>
+              <option value="SCRAP">SCRAP</option>
+              <option value="TRANSFER">TRANSFER</option>
+            </select>
+          </label>
+          <label>
+            Comment
+            <input type="text" name="comment" placeholder="Inbound shipment" />
+          </label>
+          <button type="submit">Record Movement</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Order Material</h2>
+        <form class="api-form" data-endpoint="/orders/materials">
+          <label>
+            Order ID
+            <input type="text" name="order_id" placeholder="SO-1009" required />
+          </label>
+          <label>
+            Item ID
+            <input type="number" name="item_id" placeholder="1" data-number required />
+          </label>
+          <label>
+            Lot ID
+            <input type="number" name="lot_id" placeholder="1" data-number required />
+          </label>
+          <label>
+            Qty Used
+            <input type="number" step="0.001" name="qty_used" placeholder="2" required />
+          </label>
+          <label>
+            Stock Movement ID
+            <input type="number" name="stock_movement_id" placeholder="1" data-number required />
+          </label>
+          <button type="submit">Link Order Material</button>
+        </form>
+      </section>
+
+      <section class="panel panel--wide">
+        <h2>Console</h2>
+        <pre id="output">Ready.</pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>API docs: <a href="/docs">Swagger</a> | <a href="/redoc">ReDoc</a></p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
