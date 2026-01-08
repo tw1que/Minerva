@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     db_connect_retries: int = Field(default=30, alias="DB_CONNECT_RETRIES")
     db_connect_delay: float = Field(default=1.0, alias="DB_CONNECT_DELAY")
 
+    secret_key: str = Field(default="change-me", alias="SECRET_KEY")
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    access_token_expire_minutes: int = Field(default=720, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
+    initial_admin_username: str = Field(default="admin", alias="INITIAL_ADMIN_USERNAME")
+    initial_admin_password: str = Field(default="admin123", alias="INITIAL_ADMIN_PASSWORD")
+
     cors_origins: list[str] = Field(default_factory=list, alias="CORS_ORIGINS")
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)

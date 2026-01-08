@@ -1,6 +1,6 @@
 # Minerva Inventory Forge
 
-FastAPI + Postgres inventory core with template-driven SKUs, lots, and stock movements.
+FastAPI + Postgres inventory core with template-driven SKUs, lots, stock movements, and order allocations.
 Includes a minimal brutalist UI and Docker dev/prod setups.
 
 ## Quick start (dev)
@@ -13,6 +13,13 @@ docker compose -f docker-compose.dev.yml up --build
 - API docs: http://localhost:8000/docs
 
 Dev mode auto-creates tables on startup (AUTO_CREATE_DB=true).
+
+## Default login (dev)
+
+- Username: admin
+- Password: admin123
+
+Change these via `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD`.
 
 ## Production
 
@@ -35,6 +42,8 @@ Key variables:
 - `APP_ENV` (dev|prod)
 - `AUTO_CREATE_DB` (true in dev)
 - `DB_CONNECT_RETRIES` and `DB_CONNECT_DELAY` (startup DB wait)
+- `SECRET_KEY`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `INITIAL_ADMIN_USERNAME`, `INITIAL_ADMIN_PASSWORD`
 - `CORS_ORIGINS` as JSON list string
 
 ## Notes

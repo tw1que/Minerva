@@ -16,215 +16,525 @@
     <header class="hero">
       <div class="hero__grid"></div>
       <div class="hero__content">
-        <p class="eyebrow">Minerva // Brutalist Inventory</p>
-        <h1>Inventory Forge</h1>
-        <p class="lead">
-          Define templates, stamp SKUs, track lots, and push stock movements.
-        </p>
-        <div class="pill-row">
-          <span class="pill">FastAPI</span>
-          <span class="pill">Postgres</span>
-          <span class="pill">Docker</span>
+        <div class="hero__top">
+          <div>
+            <p class="eyebrow">Minerva // Brutalist Inventory</p>
+            <h1>Inventory Forge</h1>
+            <p class="lead">
+              Operate templates, lots, and stock without touching JSON.
+            </p>
+          </div>
+          <div class="user-panel">
+            <div class="user-panel__label" id="user-label">Not signed in</div>
+            <button class="ghost" id="logout-button" type="button">Logout</button>
+          </div>
         </div>
+        <nav class="tabs" aria-label="Primary">
+          <button class="tab is-active" data-view="catalog" type="button">Catalog</button>
+          <button class="tab" data-view="inventory" type="button">Inventory</button>
+          <button class="tab" data-view="movements" type="button">Movements</button>
+          <button class="tab" data-view="orders" type="button">Orders</button>
+        </nav>
       </div>
     </header>
 
-    <main class="grid">
-      <section class="panel">
-        <h2>Manufacturers</h2>
-        <form class="api-form" data-endpoint="/manufacturers">
-          <label>
-            Name
-            <input type="text" name="name" placeholder="Nova Forge" required />
-          </label>
-          <label>
-            Code
-            <input type="text" name="code" placeholder="NF" required />
-          </label>
-          <button type="submit">Create</button>
-        </form>
+    <main class="main">
+      <section class="view is-active" id="view-catalog">
+        <div class="grid">
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <h2>Catalog</h2>
+                <p class="panel__subtitle">Search items, templates, and manufacturers.</p>
+              </div>
+              <div class="panel__filters">
+                <label>
+                  Search
+                  <input id="catalog-search" type="search" placeholder="SKU or template" />
+                </label>
+                <label>
+                  Manufacturer
+                  <select
+                    id="catalog-manufacturer"
+                    data-manufacturer-select
+                    data-placeholder="All manufacturers"
+                  ></select>
+                </label>
+                <label>
+                  Attribute Key
+                  <input id="catalog-attr-key" type="text" placeholder="grade" />
+                </label>
+                <label>
+                  Attribute Value
+                  <input id="catalog-attr-val" type="text" placeholder="A" />
+                </label>
+                <button type="button" id="catalog-filter">Filter</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="catalog-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Template</th>
+                    <th>Manufacturer</th>
+                    <th>Attributes</th>
+                    <th>UoM</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="pager" data-pager="catalog">
+              <button type="button" data-page="prev">Prev</button>
+              <span data-page="info">Page 1</span>
+              <button type="button" data-page="next">Next</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Create Template</h2>
+            <form id="template-form" data-requires="write">
+              <div class="form-status" data-status></div>
+              <label>
+                Template Name
+                <input name="name" type="text" placeholder="Steel Bar" required />
+              </label>
+              <label>
+                Manufacturer
+                <select
+                  name="manufacturer_id"
+                  data-manufacturer-select
+                  data-placeholder="No manufacturer"
+                ></select>
+              </label>
+              <div class="split">
+                <label>
+                  SKU Prefix
+                  <input name="sku_prefix" type="text" placeholder="STB" required />
+                </label>
+                <label>
+                  SKU Pattern
+                  <input
+                    name="sku_pattern"
+                    type="text"
+                    placeholder="{prefix}-{seq:04d}"
+                    required
+                  />
+                </label>
+              </div>
+              <label>
+                Sequence Scope
+                <select name="seq_scope">
+                  <option value="GLOBAL">GLOBAL</option>
+                  <option value="PER_TEMPLATE">PER_TEMPLATE</option>
+                  <option value="PER_PREFIX">PER_PREFIX</option>
+                  <option value="PER_YEAR">PER_YEAR</option>
+                </select>
+              </label>
+
+              <div class="field-builder">
+                <div class="field-builder__header">
+                  <h3>Template Fields</h3>
+                  <button type="button" class="ghost" id="add-template-field">
+                    Add Field
+                  </button>
+                </div>
+                <div id="template-fields"></div>
+              </div>
+
+              <button type="submit">Save Template</button>
+            </form>
+          </section>
+
+          <section class="panel">
+            <h2>Create Item</h2>
+            <form id="item-form" data-requires="write">
+              <div class="form-status" data-status></div>
+              <label>
+                Template
+                <select name="template_id" id="item-template-select" data-template-select></select>
+              </label>
+              <label>
+                Unit of Measure
+                <input name="uom" type="text" placeholder="kg" required />
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" name="track_lots" checked />
+                Track Lots
+              </label>
+              <div id="item-attributes" class="attribute-grid">
+                <p class="muted">Select a template to enter attributes.</p>
+              </div>
+              <details class="advanced">
+                <summary>Advanced: Raw Attributes (JSON)</summary>
+                <textarea
+                  id="item-attributes-json"
+                  rows="6"
+                  placeholder='{"size":"M"}'
+                ></textarea>
+              </details>
+              <button type="submit">Create Item</button>
+            </form>
+          </section>
+        </div>
       </section>
 
-      <section class="panel">
-        <h2>Item Template</h2>
-        <form class="api-form" data-endpoint="/templates">
-          <label>
-            Name
-            <input type="text" name="name" placeholder="Steel Bar" required />
-          </label>
-          <label>
-            Manufacturer ID
-            <input type="number" name="manufacturer_id" placeholder="1" data-number />
-          </label>
-          <label>
-            SKU Prefix
-            <input type="text" name="sku_prefix" placeholder="STB" required />
-          </label>
-          <label>
-            SKU Pattern
-            <input
-              type="text"
-              name="sku_pattern"
-              placeholder="{prefix}-{grade}-{seq:04d}"
-              required
-            />
-          </label>
-          <label>
-            Sequence Scope
-            <select name="seq_scope">
-              <option value="GLOBAL">GLOBAL</option>
-              <option value="PER_TEMPLATE">PER_TEMPLATE</option>
-              <option value="PER_PREFIX">PER_PREFIX</option>
-              <option value="PER_YEAR">PER_YEAR</option>
-            </select>
-          </label>
-          <label>
-            Fields (JSON)
-            <textarea name="fields" data-json data-default="[]" rows="6">
-[
-  {
-    "field_key": "grade",
-    "field_type": "TEXT",
-    "required": true,
-    "include_in_sku": true,
-    "sku_order": 1,
-    "format": "upper"
-  }
-]
-            </textarea>
-          </label>
-          <button type="submit">Create Template</button>
-        </form>
+      <section class="view" id="view-inventory">
+        <div class="grid">
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <h2>Inventory</h2>
+                <p class="panel__subtitle">On-hand and available stock with drilldown.</p>
+              </div>
+              <div class="panel__filters">
+                <label>
+                  Search
+                  <input id="inventory-search" type="search" placeholder="SKU or template" />
+                </label>
+                <label>
+                  Manufacturer
+                  <select
+                    id="inventory-manufacturer"
+                    data-manufacturer-select
+                    data-placeholder="All manufacturers"
+                  ></select>
+                </label>
+                <label>
+                  Attribute Key
+                  <input id="inventory-attr-key" type="text" placeholder="grade" />
+                </label>
+                <label>
+                  Attribute Value
+                  <input id="inventory-attr-val" type="text" placeholder="A" />
+                </label>
+                <button type="button" id="inventory-filter">Filter</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="inventory-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Template</th>
+                    <th>Manufacturer</th>
+                    <th>On Hand</th>
+                    <th>Reserved</th>
+                    <th>Available</th>
+                    <th>Last Move</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="pager" data-pager="inventory">
+              <button type="button" data-page="prev">Prev</button>
+              <span data-page="info">Page 1</span>
+              <button type="button" data-page="next">Next</button>
+            </div>
+          </section>
+
+          <section class="panel panel--wide" id="inventory-detail">
+            <div class="panel__header">
+              <div>
+                <h2>Item Detail</h2>
+                <p class="panel__subtitle" id="inventory-detail-title">Select an item</p>
+              </div>
+            </div>
+            <div class="detail-grid">
+              <div>
+                <h3>Lots</h3>
+                <div class="table-wrap">
+                  <table class="table" id="inventory-lots-table">
+                    <thead>
+                      <tr>
+                        <th>Lot</th>
+                        <th>Supplier</th>
+                        <th>Received</th>
+                        <th>Expires</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div>
+                <h3>Movements</h3>
+                <div class="table-wrap">
+                  <table class="table" id="inventory-movements-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Qty</th>
+                        <th>Reason</th>
+                        <th>Comment</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </section>
 
-      <section class="panel">
-        <h2>Create Item</h2>
-        <form class="api-form" data-endpoint="/items">
-          <label>
-            Template ID
-            <input type="number" name="template_id" placeholder="1" data-number required />
-          </label>
-          <label>
-            UoM
-            <input type="text" name="uom" placeholder="kg" required />
-          </label>
-          <label>
-            Track Lots
-            <input type="checkbox" name="track_lots" checked />
-          </label>
-          <label>
-            Attributes (JSON)
-            <textarea name="attributes" data-json data-default="{}" rows="6">
-{
-  "grade": "A"
-}
-            </textarea>
-          </label>
-          <button type="submit">Stamp Item + SKU</button>
-        </form>
+      <section class="view" id="view-movements">
+        <div class="grid">
+          <section class="panel">
+            <h2>Create Movement</h2>
+            <form id="movement-form" data-requires="write">
+              <div class="form-status" data-status></div>
+              <label>
+                Item Search
+                <input
+                  id="movement-item-search"
+                  type="search"
+                  list="movement-item-options"
+                  placeholder="Search SKU or template"
+                />
+                <datalist id="movement-item-options"></datalist>
+              </label>
+              <div class="muted" id="movement-item-meta">No item selected.</div>
+              <label>
+                Movement Type
+                <select id="movement-type">
+                  <option value="inbound">Inbound</option>
+                  <option value="outbound">Outbound</option>
+                  <option value="adjustment">Adjustment</option>
+                </select>
+              </label>
+              <label>
+                Reason
+                <select id="movement-reason"></select>
+              </label>
+              <div class="split">
+                <label>
+                  Quantity
+                  <input id="movement-qty" type="number" step="0.001" required />
+                </label>
+                <label>
+                  UoM
+                  <input id="movement-uom" type="text" placeholder="kg" required />
+                </label>
+              </div>
+              <label>
+                Lot
+                <select id="movement-lot"></select>
+              </label>
+              <button type="button" class="ghost" id="lot-toggle">Create new lot</button>
+              <div id="lot-create" class="lot-create is-hidden">
+                <label>
+                  Lot Code
+                  <input id="lot-code" type="text" placeholder="LOT-2026-01" />
+                </label>
+                <label>
+                  Supplier
+                  <input id="lot-supplier" type="text" placeholder="Supply Co" />
+                </label>
+                <label>
+                  Manufacturing Date
+                  <input id="lot-mfg" type="datetime-local" />
+                </label>
+                <label>
+                  Expiry Date
+                  <input id="lot-exp" type="datetime-local" />
+                </label>
+              </div>
+              <label>
+                Comment
+                <input id="movement-comment" type="text" placeholder="Adjustment note" />
+              </label>
+              <button type="submit">Record Movement</button>
+            </form>
+          </section>
+
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <h2>Ledger</h2>
+                <p class="panel__subtitle">Append-only movement history.</p>
+              </div>
+              <div class="panel__filters">
+                <label>
+                  Search
+                  <input id="movement-search" type="search" placeholder="SKU or template" />
+                </label>
+                <label>
+                  Reason
+                  <select id="movement-filter-reason">
+                    <option value="">All</option>
+                    <option value="RECEIPT">RECEIPT</option>
+                    <option value="CONSUME">CONSUME</option>
+                    <option value="ADJUST">ADJUST</option>
+                    <option value="RETURN">RETURN</option>
+                    <option value="SCRAP">SCRAP</option>
+                    <option value="TRANSFER">TRANSFER</option>
+                  </select>
+                </label>
+                <button type="button" id="movement-filter">Filter</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="movements-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>SKU</th>
+                    <th>Template</th>
+                    <th>Qty</th>
+                    <th>Reason</th>
+                    <th>Comment</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="pager" data-pager="movements">
+              <button type="button" data-page="prev">Prev</button>
+              <span data-page="info">Page 1</span>
+              <button type="button" data-page="next">Next</button>
+            </div>
+          </section>
+        </div>
       </section>
 
-      <section class="panel">
-        <h2>Create Lot</h2>
-        <form class="api-form" data-endpoint="/lots">
-          <label>
-            Item ID
-            <input type="number" name="item_id" placeholder="1" data-number required />
-          </label>
-          <label>
-            Lot Code
-            <input type="text" name="lot_code" placeholder="LOT-2025-01" required />
-          </label>
-          <label>
-            Supplier
-            <input type="text" name="supplier_name" placeholder="Supply Co" />
-          </label>
-          <label>
-            Manufacturing Date
-            <input type="datetime-local" name="manufacturing_date" />
-          </label>
-          <label>
-            Expiry Date
-            <input type="datetime-local" name="expires_at" />
-          </label>
-          <button type="submit">Create Lot</button>
-        </form>
-      </section>
+      <section class="view" id="view-orders">
+        <div class="grid">
+          <section class="panel">
+            <h2>Create Order</h2>
+            <form id="order-form" data-requires="write">
+              <div class="form-status" data-status></div>
+              <label>
+                Order Number
+                <input id="order-number" type="text" placeholder="SO-1009" required />
+              </label>
+              <label>
+                Notes
+                <input id="order-notes" type="text" placeholder="Priority build" />
+              </label>
+              <button type="submit">Create Order</button>
+            </form>
+          </section>
 
-      <section class="panel">
-        <h2>Stock Movement</h2>
-        <form class="api-form" data-endpoint="/stock/movements">
-          <label>
-            Item ID
-            <input type="number" name="item_id" placeholder="1" data-number required />
-          </label>
-          <label>
-            Lot ID
-            <input type="number" name="lot_id" placeholder="1" data-number />
-          </label>
-          <label>
-            Qty Delta
-            <input type="number" step="0.001" name="qty_delta" placeholder="10" required />
-          </label>
-          <label>
-            UoM
-            <input type="text" name="uom" placeholder="kg" required />
-          </label>
-          <label>
-            Reason
-            <select name="reason">
-              <option value="RECEIPT">RECEIPT</option>
-              <option value="CONSUME">CONSUME</option>
-              <option value="ADJUST">ADJUST</option>
-              <option value="RETURN">RETURN</option>
-              <option value="SCRAP">SCRAP</option>
-              <option value="TRANSFER">TRANSFER</option>
-            </select>
-          </label>
-          <label>
-            Comment
-            <input type="text" name="comment" placeholder="Inbound shipment" />
-          </label>
-          <button type="submit">Record Movement</button>
-        </form>
-      </section>
+          <section class="panel panel--wide">
+            <div class="panel__header">
+              <div>
+                <h2>Orders</h2>
+                <p class="panel__subtitle">Track status and allocations.</p>
+              </div>
+              <div class="panel__filters">
+                <label>
+                  Search
+                  <input id="order-search" type="search" placeholder="Order number" />
+                </label>
+                <label>
+                  Status
+                  <select id="order-status-filter">
+                    <option value="">All</option>
+                    <option value="DRAFT">DRAFT</option>
+                    <option value="RESERVED">RESERVED</option>
+                    <option value="ALLOCATED">ALLOCATED</option>
+                    <option value="FULFILLED">FULFILLED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                  </select>
+                </label>
+                <button type="button" id="order-filter">Filter</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="orders-table">
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Lines</th>
+                    <th>Allocated</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="pager" data-pager="orders">
+              <button type="button" data-page="prev">Prev</button>
+              <span data-page="info">Page 1</span>
+              <button type="button" data-page="next">Next</button>
+            </div>
+          </section>
 
-      <section class="panel">
-        <h2>Order Material</h2>
-        <form class="api-form" data-endpoint="/orders/materials">
-          <label>
-            Order ID
-            <input type="text" name="order_id" placeholder="SO-1009" required />
-          </label>
-          <label>
-            Item ID
-            <input type="number" name="item_id" placeholder="1" data-number required />
-          </label>
-          <label>
-            Lot ID
-            <input type="number" name="lot_id" placeholder="1" data-number required />
-          </label>
-          <label>
-            Qty Used
-            <input type="number" step="0.001" name="qty_used" placeholder="2" required />
-          </label>
-          <label>
-            Stock Movement ID
-            <input type="number" name="stock_movement_id" placeholder="1" data-number required />
-          </label>
-          <button type="submit">Link Order Material</button>
-        </form>
-      </section>
-
-      <section class="panel panel--wide">
-        <h2>Console</h2>
-        <pre id="output">Ready.</pre>
+          <section class="panel panel--wide" id="order-detail">
+            <div class="panel__header">
+              <div>
+                <h2>Order Detail</h2>
+                <p class="panel__subtitle" id="order-detail-title">Select an order</p>
+              </div>
+            </div>
+            <div class="order-detail__body">
+              <form id="order-line-form" data-requires="write">
+                <div class="form-status" data-status></div>
+                <label>
+                  Item Search
+                  <input
+                    id="order-item-search"
+                    type="search"
+                    list="order-item-options"
+                    placeholder="Search SKU or template"
+                  />
+                  <datalist id="order-item-options"></datalist>
+                </label>
+                <label>
+                  Quantity
+                  <input id="order-item-qty" type="number" step="0.001" required />
+                </label>
+                <button type="submit">Add Line</button>
+              </form>
+              <div class="table-wrap">
+                <table class="table" id="order-lines-table">
+                  <thead>
+                    <tr>
+                      <th>SKU</th>
+                      <th>Template</th>
+                      <th>Requested</th>
+                      <th>Allocated</th>
+                      <th>Available</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
       </section>
     </main>
 
     <footer class="footer">
       <p>API docs: <a href="/docs">Swagger</a> | <a href="/redoc">ReDoc</a></p>
     </footer>
+
+    <div class="modal" id="login-modal" aria-hidden="true">
+      <div class="panel modal__content">
+        <h2>Sign In</h2>
+        <form id="login-form">
+          <div class="form-status" id="login-status"></div>
+          <label>
+            Username
+            <input id="login-username" type="text" required />
+          </label>
+          <label>
+            Password
+            <input id="login-password" type="password" required />
+          </label>
+          <button type="submit">Enter</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
 
     <script src="/static/app.js"></script>
   </body>

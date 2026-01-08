@@ -1,100 +1,1368 @@
-const output = document.getElementById("output");
-const forms = document.querySelectorAll(".api-form");
-
 const apiPrefix = "/api";
 
-function writeOutput(data) {
-  if (!output) {
+const state = {
+  token: localStorage.getItem("minerva_token"),
+  user: null,
+  pages: {
+    catalog: 1,
+    inventory: 1,
+    movements: 1,
+    orders: 1,
+  },
+  templates: new Map(),
+  inventoryItems: new Map(),
+  activeOrderId: null,
+  activeInventoryId: null,
+};
+
+const tabs = document.querySelectorAll(".tab");
+const views = document.querySelectorAll(".view");
+
+const userLabel = document.getElementById("user-label");
+const logoutButton = document.getElementById("logout-button");
+const loginModal = document.getElementById("login-modal");
+const loginForm = document.getElementById("login-form");
+const loginUsername = document.getElementById("login-username");
+const loginPassword = document.getElementById("login-password");
+const loginStatus = document.getElementById("login-status");
+const toast = document.getElementById("toast");
+
+const catalogSearch = document.getElementById("catalog-search");
+const catalogManufacturer = document.getElementById("catalog-manufacturer");
+const catalogAttrKey = document.getElementById("catalog-attr-key");
+const catalogAttrVal = document.getElementById("catalog-attr-val");
+const catalogFilter = document.getElementById("catalog-filter");
+const catalogTableBody = document.querySelector("#catalog-table tbody");
+
+const templateForm = document.getElementById("template-form");
+const addTemplateField = document.getElementById("add-template-field");
+const templateFieldsContainer = document.getElementById("template-fields");
+
+const itemForm = document.getElementById("item-form");
+const itemTemplateSelect = document.getElementById("item-template-select");
+const itemAttributesContainer = document.getElementById("item-attributes");
+const itemAttributesJson = document.getElementById("item-attributes-json");
+
+const inventorySearch = document.getElementById("inventory-search");
+const inventoryManufacturer = document.getElementById("inventory-manufacturer");
+const inventoryAttrKey = document.getElementById("inventory-attr-key");
+const inventoryAttrVal = document.getElementById("inventory-attr-val");
+const inventoryFilter = document.getElementById("inventory-filter");
+const inventoryTableBody = document.querySelector("#inventory-table tbody");
+const inventoryDetailTitle = document.getElementById("inventory-detail-title");
+const inventoryLotsBody = document.querySelector("#inventory-lots-table tbody");
+const inventoryMovementsBody = document.querySelector("#inventory-movements-table tbody");
+
+const movementForm = document.getElementById("movement-form");
+const movementItemSearch = document.getElementById("movement-item-search");
+const movementItemOptions = document.getElementById("movement-item-options");
+const movementItemMeta = document.getElementById("movement-item-meta");
+const movementType = document.getElementById("movement-type");
+const movementReason = document.getElementById("movement-reason");
+const movementQty = document.getElementById("movement-qty");
+const movementUom = document.getElementById("movement-uom");
+const movementLot = document.getElementById("movement-lot");
+const lotToggle = document.getElementById("lot-toggle");
+const lotCreate = document.getElementById("lot-create");
+const lotCode = document.getElementById("lot-code");
+const lotSupplier = document.getElementById("lot-supplier");
+const lotMfg = document.getElementById("lot-mfg");
+const lotExp = document.getElementById("lot-exp");
+const movementComment = document.getElementById("movement-comment");
+const movementSearch = document.getElementById("movement-search");
+const movementFilterReason = document.getElementById("movement-filter-reason");
+const movementFilter = document.getElementById("movement-filter");
+const movementsTableBody = document.querySelector("#movements-table tbody");
+
+const orderForm = document.getElementById("order-form");
+const orderNumber = document.getElementById("order-number");
+const orderNotes = document.getElementById("order-notes");
+const orderSearch = document.getElementById("order-search");
+const orderStatusFilter = document.getElementById("order-status-filter");
+const orderFilter = document.getElementById("order-filter");
+const ordersTableBody = document.querySelector("#orders-table tbody");
+const orderDetailTitle = document.getElementById("order-detail-title");
+const orderLineForm = document.getElementById("order-line-form");
+const orderItemSearch = document.getElementById("order-item-search");
+const orderItemOptions = document.getElementById("order-item-options");
+const orderItemQty = document.getElementById("order-item-qty");
+const orderLinesBody = document.querySelector("#order-lines-table tbody");
+
+const movementReasonOptions = {
+  inbound: ["RECEIPT", "RETURN", "TRANSFER"],
+  outbound: ["CONSUME", "SCRAP", "TRANSFER"],
+  adjustment: ["ADJUST"],
+};
+
+function showToast(message) {
+  if (!toast) {
     return;
   }
-  output.textContent = JSON.stringify(data, null, 2);
+  toast.textContent = message;
+  toast.classList.add("is-visible");
+  clearTimeout(showToast.timeout);
+  showToast.timeout = setTimeout(() => {
+    toast.classList.remove("is-visible");
+  }, 2400);
 }
 
-function parseValue(input) {
-  if (input.dataset.json !== undefined) {
-    const raw = input.value.trim();
-    if (!raw) {
-      const fallback = input.dataset.default || "{}";
-      return JSON.parse(fallback);
-    }
-    return JSON.parse(raw);
+function setStatus(element, message, tone) {
+  if (!element) {
+    return;
   }
-
-  if (input.type === "checkbox") {
-    return input.checked;
+  element.textContent = message || "";
+  element.classList.remove("form-status--success", "form-status--error");
+  if (tone === "success") {
+    element.classList.add("form-status--success");
   }
-
-  if (input.dataset.number !== undefined) {
-    const num = Number(input.value);
-    if (Number.isNaN(num)) {
-      return null;
-    }
-    return num;
+  if (tone === "error") {
+    element.classList.add("form-status--error");
   }
-
-  return input.value;
 }
 
-function buildPayload(form) {
-  const payload = {};
-  const inputs = form.querySelectorAll("input, select, textarea");
+function clearStatus(element) {
+  setStatus(element, "", null);
+}
 
-  inputs.forEach((input) => {
-    const name = input.name;
-    if (!name) {
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return escapeHtml(value);
+  }
+  return date.toLocaleString();
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return escapeHtml(value);
+  }
+  return date.toLocaleDateString();
+}
+
+function formatQty(value) {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  const num = Number(value);
+  if (Number.isNaN(num)) {
+    return escapeHtml(value);
+  }
+  return num.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  });
+}
+
+function formatAttributes(attributes) {
+  if (!attributes || Object.keys(attributes).length === 0) {
+    return "-";
+  }
+  return Object.entries(attributes)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(", ");
+}
+
+function buildQuery(params) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === "") {
       return;
     }
+    searchParams.append(key, value);
+  });
+  return searchParams.toString();
+}
 
-    const value = parseValue(input);
-    if (value === "" || value === null) {
-      return;
+function debounce(fn, delay = 250) {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), delay);
+  };
+}
+
+async function parseError(response) {
+  try {
+    const data = await response.json();
+    if (data && data.detail) {
+      return data.detail;
     }
+  } catch (error) {
+    return `${response.status} ${response.statusText}`.trim();
+  }
+  return `${response.status} ${response.statusText}`.trim();
+}
 
-    payload[name] = value;
+async function apiRequest(path, options = {}) {
+  const { method = "GET", body = null, isForm = false } = options;
+  const headers = {
+    Accept: "application/json",
+  };
+
+  if (state.token) {
+    headers.Authorization = `Bearer ${state.token}`;
+  }
+
+  let payload = body;
+  if (body !== null) {
+    if (isForm) {
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+    } else {
+      headers["Content-Type"] = "application/json";
+      payload = JSON.stringify(body);
+    }
+  }
+
+  const response = await fetch(`${apiPrefix}${path}`, {
+    method,
+    headers,
+    body: payload,
   });
 
-  return payload;
+  if (!response.ok) {
+    const message = await parseError(response);
+    if (response.status === 401) {
+      clearSession("Please sign in to continue.");
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
 }
 
-async function handleSubmit(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const endpoint = form.dataset.endpoint;
-  if (!endpoint) {
+function openLoginModal(message) {
+  if (!loginModal) {
     return;
   }
+  loginModal.classList.add("is-visible");
+  loginModal.setAttribute("aria-hidden", "false");
+  if (message) {
+    setStatus(loginStatus, message, "error");
+  }
+}
 
-  let payload;
-  try {
-    payload = buildPayload(form);
-  } catch (err) {
-    writeOutput({ error: "Invalid JSON", detail: err.message });
+function closeLoginModal() {
+  if (!loginModal) {
     return;
   }
+  loginModal.classList.remove("is-visible");
+  loginModal.setAttribute("aria-hidden", "true");
+  clearStatus(loginStatus);
+}
 
-  try {
-    const response = await fetch(`${apiPrefix}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+function applyRole() {
+  const canWrite = Boolean(state.user && state.user.role !== "VIEWER");
+  document.querySelectorAll("[data-requires='write']").forEach((section) => {
+    section.querySelectorAll("input, select, textarea, button").forEach((control) => {
+      control.disabled = !canWrite;
     });
+  });
+}
 
-    const data = await response.json();
-    if (!response.ok) {
-      writeOutput({ error: response.status, detail: data });
+function updateUserUI() {
+  if (state.user) {
+    userLabel.textContent = `${state.user.username} (${state.user.role})`;
+    logoutButton.disabled = false;
+  } else {
+    userLabel.textContent = "Not signed in";
+    logoutButton.disabled = true;
+  }
+  applyRole();
+}
+
+function clearSession(message) {
+  state.token = null;
+  state.user = null;
+  localStorage.removeItem("minerva_token");
+  updateUserUI();
+  openLoginModal(message || "Sign in to continue.");
+}
+
+async function loadSession() {
+  if (!state.token) {
+    updateUserUI();
+    openLoginModal("Sign in to manage inventory.");
+    return;
+  }
+  try {
+    const user = await apiRequest("/auth/me");
+    state.user = user;
+    updateUserUI();
+    closeLoginModal();
+  } catch (error) {
+    clearSession("Session expired. Please sign in.");
+  }
+}
+
+function setView(name) {
+  views.forEach((view) => {
+    view.classList.toggle("is-active", view.id === `view-${name}`);
+  });
+  tabs.forEach((tab) => {
+    tab.classList.toggle("is-active", tab.dataset.view === name);
+  });
+}
+
+function updatePager(key, page, pageSize, total) {
+  const pager = document.querySelector(`[data-pager="${key}"]`);
+  if (!pager) {
+    return;
+  }
+  const pageInfo = pager.querySelector("[data-page='info']");
+  const prev = pager.querySelector("[data-page='prev']");
+  const next = pager.querySelector("[data-page='next']");
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  pageInfo.textContent = `Page ${page} of ${totalPages}`;
+  prev.disabled = page <= 1;
+  next.disabled = page >= totalPages;
+}
+
+function setupPagers() {
+  const loaders = {
+    catalog: loadCatalog,
+    inventory: loadInventory,
+    movements: loadMovements,
+    orders: loadOrders,
+  };
+  document.querySelectorAll("[data-pager]").forEach((pager) => {
+    const key = pager.dataset.pager;
+    const prev = pager.querySelector("[data-page='prev']");
+    const next = pager.querySelector("[data-page='next']");
+    if (prev) {
+      prev.addEventListener("click", () => {
+        if (state.pages[key] > 1) {
+          state.pages[key] -= 1;
+          loaders[key]();
+        }
+      });
+    }
+    if (next) {
+      next.addEventListener("click", () => {
+        state.pages[key] += 1;
+        loaders[key]();
+      });
+    }
+  });
+}
+
+function addTemplateFieldRow() {
+  const row = document.createElement("div");
+  row.className = "field-row";
+  row.innerHTML = `
+    <label>
+      Field Key
+      <input type="text" class="field-key" placeholder="size" required />
+    </label>
+    <label>
+      Type
+      <select class="field-type">
+        <option value="TEXT">TEXT</option>
+        <option value="INT">INT</option>
+        <option value="DECIMAL">DECIMAL</option>
+        <option value="ENUM">ENUM</option>
+      </select>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" class="field-required" />
+      Required
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" class="field-include" />
+      Include in SKU
+    </label>
+    <label>
+      SKU Order
+      <input type="number" class="field-order" min="0" />
+    </label>
+    <label>
+      Default
+      <input type="text" class="field-default" />
+    </label>
+    <label>
+      Enum Values
+      <input type="text" class="field-enum" placeholder="A,B,C" />
+    </label>
+    <label>
+      Format
+      <input type="text" class="field-format" placeholder="upper | lower | title | zfill:4" />
+    </label>
+    <div class="field-actions">
+      <button type="button" class="ghost field-remove">Remove</button>
+    </div>
+  `;
+  row.querySelector(".field-remove").addEventListener("click", () => {
+    row.remove();
+  });
+  templateFieldsContainer.appendChild(row);
+}
+
+function collectTemplateFields() {
+  const rows = templateFieldsContainer.querySelectorAll(".field-row");
+  const fields = [];
+  rows.forEach((row) => {
+    const key = row.querySelector(".field-key").value.trim();
+    const type = row.querySelector(".field-type").value;
+    if (!key) {
+      throw new Error("Template field key is required.");
+    }
+    const required = row.querySelector(".field-required").checked;
+    const includeInSku = row.querySelector(".field-include").checked;
+    const skuOrderRaw = row.querySelector(".field-order").value;
+    const skuOrder = skuOrderRaw ? Number(skuOrderRaw) : null;
+    const defaultValue = row.querySelector(".field-default").value.trim() || null;
+    const enumText = row.querySelector(".field-enum").value.trim();
+    let enumValues = null;
+    if (enumText) {
+      enumValues = {};
+      enumText
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .forEach((item) => {
+          enumValues[item] = item;
+        });
+    }
+    const format = row.querySelector(".field-format").value.trim() || null;
+
+    fields.push({
+      field_key: key,
+      field_type: type,
+      required,
+      include_in_sku: includeInSku,
+      sku_order: skuOrder,
+      default_value: defaultValue,
+      enum_values: enumValues,
+      format,
+    });
+  });
+  return fields;
+}
+
+function renderAttributeFields(fields) {
+  itemAttributesContainer.innerHTML = "";
+  if (!fields || fields.length === 0) {
+    itemAttributesContainer.innerHTML = "<p class='muted'>No template fields defined.</p>";
+    return;
+  }
+
+  fields.forEach((field) => {
+    const label = document.createElement("label");
+    label.textContent = `${field.field_key} (${field.field_type})`;
+    let input;
+
+    if (field.field_type === "ENUM") {
+      input = document.createElement("select");
+      const blankOption = document.createElement("option");
+      blankOption.value = "";
+      blankOption.textContent = "Select";
+      input.appendChild(blankOption);
+      if (field.enum_values) {
+        Object.entries(field.enum_values).forEach(([value, labelText]) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = labelText;
+          input.appendChild(option);
+        });
+      }
+    } else {
+      input = document.createElement("input");
+      if (field.field_type === "INT") {
+        input.type = "number";
+        input.step = "1";
+      } else if (field.field_type === "DECIMAL") {
+        input.type = "number";
+        input.step = "0.001";
+      } else {
+        input.type = "text";
+      }
+    }
+
+    input.dataset.fieldKey = field.field_key;
+    input.dataset.fieldType = field.field_type;
+    input.dataset.required = field.required ? "true" : "false";
+
+    if (field.default_value) {
+      input.value = field.default_value;
+      input.dataset.defaultValue = field.default_value;
+    }
+
+    if (field.required) {
+      input.required = true;
+    }
+
+    label.appendChild(input);
+    itemAttributesContainer.appendChild(label);
+  });
+}
+
+function collectAttributes() {
+  const attributes = {};
+  const inputs = itemAttributesContainer.querySelectorAll("[data-field-key]");
+  inputs.forEach((input) => {
+    const key = input.dataset.fieldKey;
+    const type = input.dataset.fieldType;
+    const required = input.dataset.required === "true";
+    let value = input.value.trim();
+
+    if (!value && input.dataset.defaultValue) {
+      value = input.dataset.defaultValue;
+    }
+
+    if (!value) {
+      if (required) {
+        throw new Error(`${key} is required.`);
+      }
       return;
     }
 
-    writeOutput(data);
-  } catch (err) {
-    writeOutput({ error: "Network error", detail: err.message });
+    let parsed = value;
+    if (type === "INT") {
+      parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed)) {
+        throw new Error(`${key} must be an integer.`);
+      }
+    } else if (type === "DECIMAL") {
+      parsed = Number(value);
+      if (Number.isNaN(parsed)) {
+        throw new Error(`${key} must be a number.`);
+      }
+    }
+
+    attributes[key] = parsed;
+  });
+
+  return attributes;
+}
+
+function populateManufacturerSelects(manufacturers) {
+  document.querySelectorAll("[data-manufacturer-select]").forEach((select) => {
+    const placeholder = select.dataset.placeholder || "All";
+    const currentValue = select.value;
+    select.innerHTML = "";
+    const placeholderOption = document.createElement("option");
+    placeholderOption.value = "";
+    placeholderOption.textContent = placeholder;
+    select.appendChild(placeholderOption);
+    manufacturers.forEach((manufacturer) => {
+      const option = document.createElement("option");
+      option.value = manufacturer.id;
+      option.textContent = manufacturer.name;
+      select.appendChild(option);
+    });
+    if (currentValue) {
+      select.value = currentValue;
+    }
+  });
+}
+
+function populateTemplateSelect(templates) {
+  const currentValue = itemTemplateSelect.value;
+  itemTemplateSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select template";
+  itemTemplateSelect.appendChild(placeholder);
+  templates.forEach((template) => {
+    const option = document.createElement("option");
+    option.value = template.id;
+    option.textContent = template.name;
+    itemTemplateSelect.appendChild(option);
+  });
+  if (currentValue) {
+    itemTemplateSelect.value = currentValue;
   }
 }
 
-forms.forEach((form) => {
-  form.addEventListener("submit", handleSubmit);
+async function fetchTemplate(templateId) {
+  const id = Number(templateId);
+  const cached = state.templates.get(id);
+  if (cached && cached.fields) {
+    return cached;
+  }
+  const template = await apiRequest(`/templates/${id}`);
+  state.templates.set(template.id, template);
+  return template;
+}
+
+function formatItemOption(item) {
+  return `${item.sku} - ${item.template_name}`;
+}
+
+function findItemMatch(value, items) {
+  const normalized = value.trim().toLowerCase();
+  return items.find((item) => {
+    return (
+      formatItemOption(item).toLowerCase() === normalized ||
+      item.sku.toLowerCase() === normalized
+    );
+  });
+}
+
+function bindItemSearch(input, list, onSelect) {
+  let results = [];
+
+  const loadOptions = async (term) => {
+    if (!term || term.length < 2) {
+      list.innerHTML = "";
+      results = [];
+      return;
+    }
+
+    const query = buildQuery({
+      search: term,
+      page: 1,
+      page_size: 20,
+    });
+    const data = await apiRequest(`/catalog/items?${query}`);
+    results = data.items || [];
+    list.innerHTML = results
+      .map((item) => `<option value="${escapeHtml(formatItemOption(item))}"></option>`)
+      .join("");
+  };
+
+  const debouncedLoad = debounce(loadOptions, 300);
+
+  input.addEventListener("input", () => {
+    input.dataset.itemId = "";
+    if (onSelect) {
+      onSelect(null);
+    }
+    debouncedLoad(input.value.trim());
+  });
+
+  input.addEventListener("change", () => {
+    const match = findItemMatch(input.value, results);
+    if (match) {
+      input.dataset.itemId = match.id;
+      input.value = formatItemOption(match);
+      if (onSelect) {
+        Promise.resolve(onSelect(match));
+      }
+    } else {
+      input.dataset.itemId = "";
+      if (onSelect) {
+        onSelect(null);
+      }
+    }
+  });
+}
+
+async function loadManufacturers() {
+  const query = buildQuery({ page: 1, page_size: 200 });
+  const data = await apiRequest(`/manufacturers?${query}`);
+  populateManufacturerSelects(data.items || []);
+}
+
+async function loadTemplates() {
+  const query = buildQuery({ page: 1, page_size: 200 });
+  const data = await apiRequest(`/templates?${query}`);
+  state.templates = new Map();
+  (data.items || []).forEach((template) => {
+    state.templates.set(template.id, template);
+  });
+  populateTemplateSelect(data.items || []);
+}
+
+async function loadCatalog(page = state.pages.catalog) {
+  const query = buildQuery({
+    search: catalogSearch.value.trim(),
+    manufacturer_id: catalogManufacturer.value,
+    attr_key: catalogAttrKey.value.trim(),
+    attr_val: catalogAttrVal.value.trim(),
+    page,
+    page_size: 25,
+  });
+  const data = await apiRequest(`/catalog/items?${query}`);
+  const items = data.items || [];
+  state.pages.catalog = data.page;
+  if (items.length === 0) {
+    catalogTableBody.innerHTML = "<tr><td colspan='5'>No items found.</td></tr>";
+  } else {
+    catalogTableBody.innerHTML = items
+      .map((item) => {
+        return `
+          <tr>
+            <td>${escapeHtml(item.sku)}</td>
+            <td>${escapeHtml(item.template_name)}</td>
+            <td>${escapeHtml(item.manufacturer_name || "-")}</td>
+            <td>${escapeHtml(formatAttributes(item.attributes))}</td>
+            <td>${escapeHtml(item.uom)}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+  updatePager("catalog", data.page, data.page_size, data.total);
+}
+
+async function loadInventory(page = state.pages.inventory) {
+  const query = buildQuery({
+    search: inventorySearch.value.trim(),
+    manufacturer_id: inventoryManufacturer.value,
+    attr_key: inventoryAttrKey.value.trim(),
+    attr_val: inventoryAttrVal.value.trim(),
+    page,
+    page_size: 25,
+  });
+  const data = await apiRequest(`/inventory/summary?${query}`);
+  const items = data.items || [];
+  state.pages.inventory = data.page;
+  state.inventoryItems = new Map();
+  items.forEach((item) => {
+    state.inventoryItems.set(item.item_id, item);
+  });
+
+  if (items.length === 0) {
+    inventoryTableBody.innerHTML = "<tr><td colspan='8'>No inventory records.</td></tr>";
+  } else {
+    inventoryTableBody.innerHTML = items
+      .map((item) => {
+        return `
+          <tr>
+            <td>${escapeHtml(item.sku)}</td>
+            <td>${escapeHtml(item.template_name)}</td>
+            <td>${escapeHtml(item.manufacturer_name || "-")}</td>
+            <td>${formatQty(item.on_hand)}</td>
+            <td>${formatQty(item.reserved)}</td>
+            <td>${formatQty(item.available)}</td>
+            <td>${formatDateTime(item.last_movement)}</td>
+            <td><button type="button" class="ghost" data-inventory-id="${item.item_id}">View</button></td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  inventoryTableBody.querySelectorAll("[data-inventory-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const itemId = Number(button.dataset.inventoryId);
+      loadInventoryDetail(itemId);
+    });
+  });
+
+  updatePager("inventory", data.page, data.page_size, data.total);
+}
+
+async function loadInventoryDetail(itemId) {
+  state.activeInventoryId = itemId;
+  const item = state.inventoryItems.get(itemId);
+  if (item) {
+    inventoryDetailTitle.textContent = `${item.sku} - ${item.template_name}`;
+  } else {
+    inventoryDetailTitle.textContent = `Item ${itemId}`;
+  }
+
+  const lotsQuery = buildQuery({ item_id: itemId, page: 1, page_size: 50 });
+  const lotsData = await apiRequest(`/lots?${lotsQuery}`);
+  const lots = lotsData.items || [];
+
+  if (lots.length === 0) {
+    inventoryLotsBody.innerHTML = "<tr><td colspan='4'>No lots.</td></tr>";
+  } else {
+    inventoryLotsBody.innerHTML = lots
+      .map((lot) => {
+        return `
+          <tr>
+            <td>${escapeHtml(lot.lot_code)}</td>
+            <td>${escapeHtml(lot.supplier_name || "-")}</td>
+            <td>${formatDate(lot.received_at)}</td>
+            <td>${formatDate(lot.expires_at)}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  const movesQuery = buildQuery({ item_id: itemId, page: 1, page_size: 20 });
+  const movesData = await apiRequest(`/movements?${movesQuery}`);
+  const moves = movesData.items || [];
+
+  if (moves.length === 0) {
+    inventoryMovementsBody.innerHTML = "<tr><td colspan='4'>No movements.</td></tr>";
+  } else {
+    inventoryMovementsBody.innerHTML = moves
+      .map((move) => {
+        return `
+          <tr>
+            <td>${formatDateTime(move.created_at)}</td>
+            <td>${formatQty(move.qty_delta)} ${escapeHtml(move.uom)}</td>
+            <td>${escapeHtml(move.reason)}</td>
+            <td>${escapeHtml(move.comment || "-")}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+}
+
+async function loadLotsForItem(itemId) {
+  movementLot.innerHTML = "<option value=''>Select lot</option>";
+  if (!itemId) {
+    return;
+  }
+
+  const query = buildQuery({ item_id: itemId, page: 1, page_size: 50 });
+  const data = await apiRequest(`/lots?${query}`);
+  const lots = data.items || [];
+  lots.forEach((lot) => {
+    const option = document.createElement("option");
+    option.value = lot.id;
+    option.textContent = lot.lot_code;
+    movementLot.appendChild(option);
+  });
+}
+
+async function loadMovements(page = state.pages.movements) {
+  const query = buildQuery({
+    search: movementSearch.value.trim(),
+    reason: movementFilterReason.value,
+    page,
+    page_size: 50,
+  });
+  const data = await apiRequest(`/movements?${query}`);
+  const items = data.items || [];
+  state.pages.movements = data.page;
+
+  if (items.length === 0) {
+    movementsTableBody.innerHTML = "<tr><td colspan='6'>No movements.</td></tr>";
+  } else {
+    movementsTableBody.innerHTML = items
+      .map((move) => {
+        return `
+          <tr>
+            <td>${formatDateTime(move.created_at)}</td>
+            <td>${escapeHtml(move.item_sku)}</td>
+            <td>${escapeHtml(move.template_name)}</td>
+            <td>${formatQty(move.qty_delta)} ${escapeHtml(move.uom)}</td>
+            <td>${escapeHtml(move.reason)}</td>
+            <td>${escapeHtml(move.comment || "-")}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  updatePager("movements", data.page, data.page_size, data.total);
+}
+
+async function loadOrders(page = state.pages.orders) {
+  const query = buildQuery({
+    search: orderSearch.value.trim(),
+    status_filter: orderStatusFilter.value,
+    page,
+    page_size: 25,
+  });
+  const data = await apiRequest(`/orders?${query}`);
+  const items = data.items || [];
+  state.pages.orders = data.page;
+
+  if (items.length === 0) {
+    ordersTableBody.innerHTML = "<tr><td colspan='5'>No orders.</td></tr>";
+  } else {
+    ordersTableBody.innerHTML = items
+      .map((order) => {
+        const allocatedLabel = `${formatQty(order.qty_allocated)} / ${formatQty(
+          order.qty_requested
+        )}`;
+        return `
+          <tr>
+            <td>${escapeHtml(order.order_number)}</td>
+            <td>${escapeHtml(order.status)}</td>
+            <td>${escapeHtml(String(order.line_count))}</td>
+            <td>${escapeHtml(allocatedLabel)}</td>
+            <td><button type="button" class="ghost" data-order-id="${order.id}">View</button></td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  ordersTableBody.querySelectorAll("[data-order-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const orderId = Number(button.dataset.orderId);
+      loadOrderDetail(orderId);
+    });
+  });
+
+  updatePager("orders", data.page, data.page_size, data.total);
+}
+
+async function loadOrderDetail(orderId) {
+  if (!orderId) {
+    orderDetailTitle.textContent = "Select an order";
+    orderLinesBody.innerHTML = "";
+    return;
+  }
+  const data = await apiRequest(`/orders/${orderId}`);
+  state.activeOrderId = orderId;
+  orderDetailTitle.textContent = `Order ${data.order_number} (${data.status})`;
+
+  const canWrite = Boolean(state.user && state.user.role !== "VIEWER");
+  const lines = data.lines || [];
+
+  if (lines.length === 0) {
+    orderLinesBody.innerHTML = "<tr><td colspan='6'>No lines yet.</td></tr>";
+  } else {
+    orderLinesBody.innerHTML = lines
+      .map((line) => {
+        const remaining = Number(line.qty_requested) - Number(line.qty_allocated);
+        const available = Number(line.available);
+        const disableAllocate = remaining <= 0 || available <= 0;
+        const allocateButton = canWrite
+          ? `<button type="button" class="ghost" data-allocate-line="${line.id}" data-order-id="${data.id}" data-remaining="${remaining}" data-available="${available}" ${disableAllocate ? "disabled" : ""}>Allocate</button>`
+          : "";
+
+        return `
+          <tr>
+            <td>${escapeHtml(line.item_sku)}</td>
+            <td>${escapeHtml(line.template_name)}</td>
+            <td>${formatQty(line.qty_requested)}</td>
+            <td>${formatQty(line.qty_allocated)}</td>
+            <td>${formatQty(line.available)}</td>
+            <td>${allocateButton || "-"}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  orderLinesBody.querySelectorAll("[data-allocate-line]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const lineId = Number(button.dataset.allocateLine);
+      const orderIdValue = Number(button.dataset.orderId);
+      const remaining = Number(button.dataset.remaining);
+      const available = Number(button.dataset.available);
+
+      if (remaining <= 0) {
+        showToast("Nothing left to allocate.");
+        return;
+      }
+
+      const raw = window.prompt(
+        `Allocate quantity (blank for remaining ${remaining}):`
+      );
+      if (raw === null) {
+        return;
+      }
+
+      let qty = null;
+      if (raw.trim() !== "") {
+        qty = Number(raw);
+        if (Number.isNaN(qty) || qty <= 0) {
+          showToast("Allocation must be a positive number.");
+          return;
+        }
+        if (qty > remaining) {
+          showToast("Allocation exceeds line quantity.");
+          return;
+        }
+        if (qty > available) {
+          showToast("Allocation exceeds available stock.");
+          return;
+        }
+      } else if (remaining > available) {
+        showToast("Remaining quantity exceeds available stock.");
+        return;
+      }
+
+      await apiRequest(`/orders/${orderIdValue}/allocate`, {
+        method: "POST",
+        body: {
+          line_id: lineId,
+          qty: qty,
+        },
+      });
+      await loadOrderDetail(orderIdValue);
+      await loadOrders();
+      await loadInventory();
+    });
+  });
+}
+
+function updateMovementReasons() {
+  const type = movementType.value;
+  const options = movementReasonOptions[type] || ["RECEIPT"];
+  movementReason.innerHTML = options
+    .map((reason) => `<option value="${reason}">${reason}</option>`)
+    .join("");
+
+  if (type === "adjustment") {
+    movementComment.placeholder = "Adjustment note (required)";
+  } else {
+    movementComment.placeholder = "Comment";
+  }
+}
+
+function resetMovementForm() {
+  movementForm.reset();
+  movementItemMeta.textContent = "No item selected.";
+  movementItemSearch.value = "";
+  movementItemSearch.dataset.itemId = "";
+  movementLot.disabled = true;
+  lotToggle.disabled = true;
+  lotCreate.classList.add("is-hidden");
+  movementLot.innerHTML = "<option value=''>Select lot</option>";
+  updateMovementReasons();
+}
+
+function safeLoad(loader, label) {
+  loader().catch((error) => {
+    showToast(`${label}: ${error.message}`);
+  });
+}
+
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearStatus(loginStatus);
+
+  try {
+    const payload = new URLSearchParams({
+      username: loginUsername.value.trim(),
+      password: loginPassword.value,
+    });
+
+    const data = await apiRequest("/auth/login", {
+      method: "POST",
+      body: payload.toString(),
+      isForm: true,
+    });
+
+    state.token = data.access_token;
+    localStorage.setItem("minerva_token", data.access_token);
+    await loadSession();
+  } catch (error) {
+    setStatus(loginStatus, error.message, "error");
+  }
 });
 
-writeOutput({ status: "Ready for input" });
+logoutButton.addEventListener("click", () => {
+  clearSession("Signed out.");
+});
+
+tabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    setView(tab.dataset.view);
+  });
+});
+
+catalogFilter.addEventListener("click", () => {
+  state.pages.catalog = 1;
+  safeLoad(loadCatalog, "Catalog");
+});
+
+inventoryFilter.addEventListener("click", () => {
+  state.pages.inventory = 1;
+  safeLoad(loadInventory, "Inventory");
+});
+
+movementFilter.addEventListener("click", () => {
+  state.pages.movements = 1;
+  safeLoad(loadMovements, "Movements");
+});
+
+orderFilter.addEventListener("click", () => {
+  state.pages.orders = 1;
+  safeLoad(loadOrders, "Orders");
+});
+
+addTemplateField.addEventListener("click", () => {
+  addTemplateFieldRow();
+});
+
+templateForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = templateForm.querySelector("[data-status]");
+  clearStatus(status);
+
+  try {
+    const payload = {
+      name: templateForm.querySelector("[name='name']").value.trim(),
+      manufacturer_id: templateForm.querySelector("[name='manufacturer_id']").value || null,
+      sku_prefix: templateForm.querySelector("[name='sku_prefix']").value.trim(),
+      sku_pattern: templateForm.querySelector("[name='sku_pattern']").value.trim(),
+      seq_scope: templateForm.querySelector("[name='seq_scope']").value,
+      fields: collectTemplateFields(),
+    };
+
+    if (payload.manufacturer_id) {
+      payload.manufacturer_id = Number(payload.manufacturer_id);
+    }
+
+    await apiRequest("/templates", {
+      method: "POST",
+      body: payload,
+    });
+
+    setStatus(status, "Template created.", "success");
+    templateForm.reset();
+    templateFieldsContainer.innerHTML = "";
+    addTemplateFieldRow();
+    await loadTemplates();
+    await loadCatalog();
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  }
+});
+
+itemTemplateSelect.addEventListener("change", async () => {
+  const templateId = itemTemplateSelect.value;
+  itemAttributesJson.value = "";
+  if (!templateId) {
+    itemAttributesContainer.innerHTML = "<p class='muted'>Select a template to enter attributes.</p>";
+    return;
+  }
+  try {
+    const template = await fetchTemplate(templateId);
+    renderAttributeFields(template.fields || []);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+itemForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = itemForm.querySelector("[data-status]");
+  clearStatus(status);
+
+  try {
+    const templateId = itemTemplateSelect.value;
+    if (!templateId) {
+      throw new Error("Select a template.");
+    }
+
+    let attributes = {};
+    if (itemAttributesJson.value.trim()) {
+      attributes = JSON.parse(itemAttributesJson.value.trim());
+    } else {
+      attributes = collectAttributes();
+    }
+
+    const payload = {
+      template_id: Number(templateId),
+      uom: itemForm.querySelector("[name='uom']").value.trim(),
+      track_lots: itemForm.querySelector("[name='track_lots']").checked,
+      attributes,
+    };
+
+    await apiRequest("/items", {
+      method: "POST",
+      body: payload,
+    });
+
+    setStatus(status, "Item created.", "success");
+    itemForm.reset();
+    itemAttributesContainer.innerHTML = "<p class='muted'>Select a template to enter attributes.</p>";
+    itemAttributesJson.value = "";
+    await loadCatalog();
+    await loadInventory();
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  }
+});
+
+movementType.addEventListener("change", updateMovementReasons);
+
+lotToggle.addEventListener("click", () => {
+  lotCreate.classList.toggle("is-hidden");
+});
+
+bindItemSearch(movementItemSearch, movementItemOptions, async (item) => {
+  if (!item) {
+    movementItemMeta.textContent = "No item selected.";
+    movementItemSearch.dataset.itemId = "";
+    movementLot.disabled = true;
+    lotToggle.disabled = true;
+    lotCreate.classList.add("is-hidden");
+    movementLot.innerHTML = "<option value=''>Select lot</option>";
+    return;
+  }
+
+  movementItemMeta.textContent = `${item.sku} - ${item.template_name}`;
+  movementItemSearch.dataset.itemId = item.id;
+  const trackLots = item.track_lots;
+  movementLot.disabled = !trackLots;
+  lotToggle.disabled = !trackLots;
+  if (!trackLots) {
+    lotCreate.classList.add("is-hidden");
+  }
+  movementUom.value = item.uom;
+  if (trackLots) {
+    await loadLotsForItem(item.id);
+  }
+});
+
+movementForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = movementForm.querySelector("[data-status]");
+  clearStatus(status);
+
+  try {
+    const itemId = movementItemSearch.dataset.itemId;
+    if (!itemId) {
+      throw new Error("Select an item.");
+    }
+
+    const qty = Number(movementQty.value);
+    if (!qty || qty <= 0) {
+      throw new Error("Quantity must be greater than zero.");
+    }
+
+    const type = movementType.value;
+    const signedQty = type === "outbound" ? -Math.abs(qty) : Math.abs(qty);
+
+    if (type === "adjustment" && !movementComment.value.trim()) {
+      throw new Error("Adjustment requires a comment.");
+    }
+
+    let lotId = movementLot.value ? Number(movementLot.value) : null;
+    if (!lotCreate.classList.contains("is-hidden") && lotCode.value.trim()) {
+      const lotPayload = {
+        item_id: Number(itemId),
+        lot_code: lotCode.value.trim(),
+        supplier_name: lotSupplier.value.trim() || null,
+        manufacturing_date: lotMfg.value || null,
+        expires_at: lotExp.value || null,
+      };
+      const lot = await apiRequest("/lots", {
+        method: "POST",
+        body: lotPayload,
+      });
+      lotId = lot.id;
+    }
+
+    const payload = {
+      item_id: Number(itemId),
+      lot_id: lotId,
+      qty_delta: signedQty,
+      uom: movementUom.value.trim(),
+      reason: movementReason.value,
+      comment: movementComment.value.trim() || null,
+    };
+
+    await apiRequest("/movements", {
+      method: "POST",
+      body: payload,
+    });
+
+    setStatus(status, "Movement recorded.", "success");
+    resetMovementForm();
+    await loadMovements();
+    await loadInventory();
+    if (state.activeInventoryId === Number(itemId)) {
+      await loadInventoryDetail(Number(itemId));
+    }
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  }
+});
+
+orderForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = orderForm.querySelector("[data-status]");
+  clearStatus(status);
+
+  try {
+    const payload = {
+      order_number: orderNumber.value.trim(),
+      notes: orderNotes.value.trim() || null,
+    };
+    const order = await apiRequest("/orders", {
+      method: "POST",
+      body: payload,
+    });
+
+    setStatus(status, "Order created.", "success");
+    orderForm.reset();
+    await loadOrders();
+    await loadOrderDetail(order.id);
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  }
+});
+
+bindItemSearch(orderItemSearch, orderItemOptions, (item) => {
+  if (item) {
+    orderItemSearch.dataset.itemId = item.id;
+  } else {
+    orderItemSearch.dataset.itemId = "";
+  }
+});
+
+orderLineForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = orderLineForm.querySelector("[data-status]");
+  clearStatus(status);
+
+  try {
+    if (!state.activeOrderId) {
+      throw new Error("Select an order first.");
+    }
+
+    const itemId = orderItemSearch.dataset.itemId;
+    if (!itemId) {
+      throw new Error("Select an item.");
+    }
+
+    const qty = Number(orderItemQty.value);
+    if (!qty || qty <= 0) {
+      throw new Error("Quantity must be greater than zero.");
+    }
+
+    const payload = {
+      item_id: Number(itemId),
+      qty_requested: qty,
+    };
+
+    await apiRequest(`/orders/${state.activeOrderId}/lines`, {
+      method: "POST",
+      body: payload,
+    });
+
+    setStatus(status, "Line added.", "success");
+    orderLineForm.reset();
+    orderItemSearch.dataset.itemId = "";
+    await loadOrderDetail(state.activeOrderId);
+    await loadOrders();
+    await loadInventory();
+  } catch (error) {
+    setStatus(status, error.message, "error");
+  }
+});
+
+function init() {
+  setupPagers();
+  addTemplateFieldRow();
+  updateMovementReasons();
+  resetMovementForm();
+
+  safeLoad(loadManufacturers, "Manufacturers");
+  safeLoad(loadTemplates, "Templates");
+  safeLoad(loadCatalog, "Catalog");
+  safeLoad(loadInventory, "Inventory");
+  safeLoad(loadMovements, "Movements");
+  safeLoad(loadOrders, "Orders");
+
+  loadSession();
+}
+
+init();

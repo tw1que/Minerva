@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
-from app.db.models import ItemTemplate, Manufacturer, TemplateField
+from app.api.deps import get_db, require_roles
+from app.api.pagination import normalize_pagination
+from app.db.models import ItemTemplate, Manufacturer, TemplateField, UserRole
+from app.schemas.pagination import Page
 from app.schemas.template import TemplateCreate, TemplateRead
 
 router = APIRouter(prefix="/templates")
@@ -16,6 +18,7 @@ router = APIRouter(prefix="/templates")
 def create_template(
     payload: TemplateCreate,
     db: Session = Depends(get_db),
+    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> ItemTemplate:
     if payload.manufacturer_id is not None:
         manufacturer = db.get(Manufacturer, payload.manufacturer_id)
@@ -51,17 +54,29 @@ def create_template(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Template already exists.") from exc
+
     return template
 
 
-@router.get("/", response_model=list[TemplateRead])
+@router.get("/", response_model=Page[TemplateRead])
 def list_templates(
-    limit: int = 100,
-    offset: int = 0,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
     db: Session = Depends(get_db),
-) -> list[ItemTemplate]:
-    stmt = select(ItemTemplate).offset(offset).limit(limit)
-    return list(db.execute(stmt).scalars().all())
+) -> dict:
+    stmt = select(ItemTemplate)
+    if search:
+        stmt = stmt.where(ItemTemplate.name.ilike(f"%{search}%"))
+
+    page, page_size, offset = normalize_pagination(page, page_size)
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+    items = (
+        db.execute(stmt.order_by(ItemTemplate.name).offset(offset).limit(page_size))
+        .scalars()
+        .all()
+    )
+    return {"items": list(items), "page": page, "page_size": page_size, "total": total}
 
 
 @router.get("/{template_id}", response_model=TemplateRead)

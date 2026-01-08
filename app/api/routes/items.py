@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
-from app.db.models import Item, ItemTemplate
+from app.api.deps import get_db, require_roles
+from app.db.models import Item, ItemTemplate, UserRole
 from app.db.models import compute_attributes_hash
 from app.schemas.item import ItemCreate, ItemRead
 from app.services.attributes import AttributeValidationError, normalize_attributes, to_jsonable
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/items")
 def create_item(
     payload: ItemCreate,
     db: Session = Depends(get_db),
+    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> Item:
     template = db.get(ItemTemplate, payload.template_id)
     if not template:
@@ -64,16 +65,6 @@ def create_item(
         raise HTTPException(status_code=409, detail="SKU already exists.") from exc
 
     return item
-
-
-@router.get("/", response_model=list[ItemRead])
-def list_items(
-    limit: int = 100,
-    offset: int = 0,
-    db: Session = Depends(get_db),
-) -> list[Item]:
-    stmt = select(Item).offset(offset).limit(limit)
-    return list(db.execute(stmt).scalars().all())
 
 
 @router.get("/{item_id}", response_model=ItemRead)

@@ -77,6 +77,20 @@ class StockReason(enum.Enum):
     TRANSFER = "TRANSFER"
 
 
+class UserRole(enum.Enum):
+    ADMIN = "ADMIN"
+    OPERATOR = "OPERATOR"
+    VIEWER = "VIEWER"
+
+
+class OrderStatus(enum.Enum):
+    DRAFT = "DRAFT"
+    RESERVED = "RESERVED"
+    ALLOCATED = "ALLOCATED"
+    FULFILLED = "FULFILLED"
+    CANCELLED = "CANCELLED"
+
+
 # -----------------------------
 # Reference (optional)
 # -----------------------------
@@ -90,6 +104,25 @@ class Manufacturer(Base, TimestampMixin, SoftActiveMixin):
 
     def __repr__(self) -> str:
         return f"<Manufacturer id={self.id} code={self.code!r} name={self.name!r}>"
+
+
+# -----------------------------
+# Users
+# -----------------------------
+
+class User(Base, TimestampMixin, SoftActiveMixin):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role"),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<User id={self.id} username={self.username!r} role={self.role.value}>"
 
 
 # -----------------------------
@@ -145,8 +178,8 @@ class TemplateField(Base, TimestampMixin, SoftActiveMixin):
     sku_order: Mapped[int | None] = mapped_column(Integer)
 
     default_value: Mapped[str | None] = mapped_column(String)
-    enum_values: Mapped[dict | None] = mapped_column(JSONB)  # {"values": [...]}
-    format: Mapped[str | None] = mapped_column(String)       # e.g. "upper", "zfill:3", "map:..."
+    enum_values: Mapped[dict | None] = mapped_column(JSONB)
+    format: Mapped[str | None] = mapped_column(String)
 
     template: Mapped[ItemTemplate] = relationship(back_populates="fields")
 
@@ -203,6 +236,7 @@ class Item(Base, TimestampMixin, SoftActiveMixin):
 
     template: Mapped[ItemTemplate] = relationship(back_populates="items")
     lots: Mapped[list["Lot"]] = relationship(back_populates="item")
+    order_lines: Mapped[list["OrderLine"]] = relationship(back_populates="item")
 
     __table_args__ = (
         UniqueConstraint("template_id", "attributes_hash", name="uq_item_variant"),
@@ -297,6 +331,72 @@ class StockMovement(Base):
 
     def __repr__(self) -> str:
         return f"<StockMovement id={self.id} item_id={self.item_id} lot_id={self.lot_id} qty={self.qty_delta} reason={self.reason.value}>"
+
+
+# -----------------------------
+# Orders + allocations
+# -----------------------------
+
+class Order(Base, TimestampMixin):
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_number: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    status: Mapped[OrderStatus] = mapped_column(
+        Enum(OrderStatus, name="order_status"),
+        nullable=False,
+        server_default=OrderStatus.DRAFT.value,
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_by: Mapped[User | None] = relationship()
+
+    lines: Mapped[list["OrderLine"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<Order id={self.id} number={self.order_number!r} status={self.status.value}>"
+
+
+class OrderLine(Base, TimestampMixin):
+    __tablename__ = "order_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    qty_requested: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    qty_allocated: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        server_default="0",
+    )
+    uom: Mapped[str] = mapped_column(String, nullable=False)
+
+    order: Mapped[Order] = relationship(back_populates="lines")
+    item: Mapped[Item] = relationship(back_populates="order_lines")
+
+    __table_args__ = (
+        CheckConstraint("qty_requested > 0", name="ck_order_line_qty_positive"),
+        CheckConstraint("qty_allocated >= 0", name="ck_order_line_allocated_nonneg"),
+        CheckConstraint("qty_allocated <= qty_requested", name="ck_order_line_allocated_leq"),
+        UniqueConstraint("order_id", "item_id", name="uq_order_line_item"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OrderLine id={self.id} order_id={self.order_id} item_id={self.item_id} qty={self.qty_requested}>"
 
 
 # -----------------------------

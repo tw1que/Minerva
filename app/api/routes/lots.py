@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
-from app.db.models import Item, Lot
+from app.api.deps import get_db, require_roles
+from app.api.pagination import normalize_pagination
+from app.db.models import Item, Lot, UserRole
 from app.schemas.lot import LotCreate, LotRead
+from app.schemas.pagination import Page
 
 router = APIRouter(prefix="/lots")
 
@@ -16,6 +18,7 @@ router = APIRouter(prefix="/lots")
 def create_lot(
     payload: LotCreate,
     db: Session = Depends(get_db),
+    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> Lot:
     item = db.get(Item, payload.item_id)
     if not item:
@@ -45,14 +48,25 @@ def create_lot(
     return lot
 
 
-@router.get("/", response_model=list[LotRead])
+@router.get("/", response_model=Page[LotRead])
 def list_lots(
-    limit: int = 100,
-    offset: int = 0,
+    item_id: int | None = None,
+    page: int = 1,
+    page_size: int = 50,
     db: Session = Depends(get_db),
-) -> list[Lot]:
-    stmt = select(Lot).offset(offset).limit(limit)
-    return list(db.execute(stmt).scalars().all())
+) -> dict:
+    stmt = select(Lot)
+    if item_id:
+        stmt = stmt.where(Lot.item_id == item_id)
+
+    page, page_size, offset = normalize_pagination(page, page_size)
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+    items = (
+        db.execute(stmt.order_by(Lot.received_at.desc()).offset(offset).limit(page_size))
+        .scalars()
+        .all()
+    )
+    return {"items": list(items), "page": page, "page_size": page_size, "total": total}
 
 
 @router.get("/{lot_id}", response_model=LotRead)

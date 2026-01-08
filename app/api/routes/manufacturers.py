@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
-from app.db.models import Manufacturer
+from app.api.deps import get_db, require_roles
+from app.api.pagination import normalize_pagination
+from app.db.models import Manufacturer, UserRole
 from app.schemas.manufacturer import ManufacturerCreate, ManufacturerRead
+from app.schemas.pagination import Page
 
 router = APIRouter(prefix="/manufacturers")
 
@@ -15,6 +17,7 @@ router = APIRouter(prefix="/manufacturers")
 def create_manufacturer(
     payload: ManufacturerCreate,
     db: Session = Depends(get_db),
+    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> Manufacturer:
     existing = db.execute(
         select(Manufacturer).where(
@@ -31,14 +34,28 @@ def create_manufacturer(
     return manufacturer
 
 
-@router.get("/", response_model=list[ManufacturerRead])
+@router.get("/", response_model=Page[ManufacturerRead])
 def list_manufacturers(
-    limit: int = 100,
-    offset: int = 0,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
     db: Session = Depends(get_db),
-) -> list[Manufacturer]:
-    stmt = select(Manufacturer).offset(offset).limit(limit)
-    return list(db.execute(stmt).scalars().all())
+) -> dict:
+    stmt = select(Manufacturer)
+    if search:
+        pattern = f"%{search}%"
+        stmt = stmt.where(
+            or_(Manufacturer.name.ilike(pattern), Manufacturer.code.ilike(pattern))
+        )
+
+    page, page_size, offset = normalize_pagination(page, page_size)
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+    items = (
+        db.execute(stmt.order_by(Manufacturer.name).offset(offset).limit(page_size))
+        .scalars()
+        .all()
+    )
+    return {"items": list(items), "page": page, "page_size": page_size, "total": total}
 
 
 @router.get("/{manufacturer_id}", response_model=ManufacturerRead)
