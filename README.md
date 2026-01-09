@@ -48,5 +48,39 @@ Key variables:
 
 ## Notes
 
-- SKU generation uses the template `sku_pattern` plus template field placeholders.
-- Use `{prefix}` and `{seq:04d}` in patterns, plus any field keys marked `include_in_sku`.
+### Template specs + SKU rules
+
+Templates now define JSON-driven attribute specs and SKU rules.
+
+Example payload for `POST /templates`:
+
+```json
+{
+  "name": "Blanks voor freesmachine",
+  "attribute_specs": [
+    {"key": "diameter", "type": "int", "required": true, "allowed_values": [95, 98]},
+    {"key": "thickness", "type": "int", "required": true, "allowed_range": {"min": 10, "max": 30, "step": 1}},
+    {"key": "color", "type": "enum", "required": true, "allowed_values": ["A1", "A2", "A3", "B1", "BL"]},
+    {
+      "key": "type",
+      "type": "enum",
+      "required": true,
+      "allowed_values": ["mono", "multilayer"],
+      "normalize": {"lower": true},
+      "sku_map": {"mono": "MO", "multilayer": "ML"}
+    }
+  ],
+  "sku_rule": {
+    "prefix": "BLK",
+    "separator": "-",
+    "tokens": ["diameter", "thickness", "color", "type"],
+    "version": 1,
+    "freeze_existing_skus": true
+  }
+}
+```
+
+Key points:
+- `attribute_specs` validates and normalizes attributes (required, enum/range, normalize, sku_map).
+- `sku_rule` builds SKU from ordered tokens with the template prefix and separator.
+- No property prefixes are added; SKU becomes `BLK-98-20-A2-ML` (or `BLK-98-20-A2` if optional tokens are missing).

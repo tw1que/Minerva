@@ -1,69 +1,66 @@
-from datetime import datetime
-from decimal import Decimal
-
 import pytest
 
-from app.db.models import TemplateField, TemplateFieldType, UserRole
-from app.services.attributes import (
-    AttributeValidationError,
-    normalize_attributes,
-    to_jsonable,
-)
+from app.db.models import ItemTemplate, SKUSequenceScope
+from app.services.attributes import AttributeValidationError, validate_and_normalize_attributes
 
 
-def _field(
-    field_key: str,
-    field_type: TemplateFieldType,
-    *,
-    required: bool = False,
-    default_value: str | None = None,
-    enum_values: dict | None = None,
-) -> TemplateField:
-    return TemplateField(
-        template_id=1,
-        field_key=field_key,
-        field_type=field_type,
-        required=required,
-        default_value=default_value,
-        enum_values=enum_values,
+def _template(attribute_specs: list[dict]) -> ItemTemplate:
+    return ItemTemplate(
+        id=1,
+        name="Widget",
+        sku_prefix="WX",
+        sku_pattern="{prefix}",
+        seq_scope=SKUSequenceScope.GLOBAL,
+        attribute_specs=attribute_specs,
+        sku_rule={"prefix": "WX", "tokens": []},
     )
 
 
-def test_normalize_attributes_defaults_and_coercion() -> None:
-    fields = [
-        _field("size", TemplateFieldType.INT, required=True),
-        _field("weight", TemplateFieldType.DECIMAL),
-        _field("color", TemplateFieldType.TEXT, default_value="blue"),
-    ]
-    result = normalize_attributes(fields, {"size": "5", "weight": "1.25"})
-    assert result["size"] == 5
-    assert result["weight"] == Decimal("1.25")
-    assert result["color"] == "blue"
+def test_validate_and_normalize_attributes_coerces_types() -> None:
+    template = _template(
+        [
+            {"key": "diameter", "type": "int", "required": True, "allowed_values": [95, 98]},
+            {
+                "key": "type",
+                "type": "enum",
+                "required": True,
+                "allowed_values": ["mono", "multilayer"],
+                "normalize": {"lower": True},
+            },
+        ]
+    )
+    result = validate_and_normalize_attributes(
+        template, {"diameter": "98", "type": "MultiLayer"}
+    )
+    assert result == {"diameter": 98, "type": "multilayer"}
 
 
-def test_normalize_attributes_requires_missing_field() -> None:
-    fields = [_field("size", TemplateFieldType.INT, required=True)]
+def test_validate_and_normalize_requires_missing_field() -> None:
+    template = _template([{"key": "size", "type": "int", "required": True}])
     with pytest.raises(AttributeValidationError):
-        normalize_attributes(fields, {})
+        validate_and_normalize_attributes(template, {})
 
 
-def test_normalize_attributes_validates_enum_values() -> None:
-    fields = [
-        _field("grade", TemplateFieldType.ENUM, enum_values={"values": ["A", "B"]}),
-    ]
+def test_validate_and_normalize_validates_range_and_step() -> None:
+    template = _template(
+        [
+            {
+                "key": "thickness",
+                "type": "int",
+                "required": True,
+                "allowed_range": {"min": 10, "max": 30, "step": 1},
+            }
+        ]
+    )
     with pytest.raises(AttributeValidationError):
-        normalize_attributes(fields, {"grade": "C"})
+        validate_and_normalize_attributes(template, {"thickness": 9})
+    with pytest.raises(AttributeValidationError):
+        validate_and_normalize_attributes(template, {"thickness": 10.5})
+    result = validate_and_normalize_attributes(template, {"thickness": 20})
+    assert result["thickness"] == 20
 
 
-def test_to_jsonable_serializes_nested_types() -> None:
-    attrs = {
-        "qty": Decimal("1.5"),
-        "ts": datetime(2024, 1, 1, 12, 0, 0),
-        "role": UserRole.ADMIN,
-        "nested": {"items": [Decimal("2.0")]},
-    }
-    jsonable = to_jsonable(attrs)
-    assert jsonable["qty"] == "1.5"
-    assert jsonable["ts"] == "2024-01-01T12:00:00"
-    assert jsonable["role"] == "ADMIN"
-    assert jsonable["nested"]["items"] == ["2.0"]
+def test_validate_and_normalize_rejects_unknown_keys() -> None:
+    template = _template([{"key": "color", "type": "string"}])
+    with pytest.raises(AttributeValidationError):
+        validate_and_normalize_attributes(template, {"color": "blue", "extra": "nope"})

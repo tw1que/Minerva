@@ -23,7 +23,7 @@ class MovementRead(BaseModel):
     id: int
     created_at: datetime
     item_id: int
-    item_sku: str
+    item_product_code: str
     template_name: str
     lot_id: int | None
     qty_delta: Decimal

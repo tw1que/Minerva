@@ -44,7 +44,7 @@ class OrderLineRead(BaseModel):
     id: int
     order_id: int
     item_id: int
-    item_sku: str
+    item_product_code: str
     template_name: str
     qty_requested: Decimal
     qty_allocated: Decimal

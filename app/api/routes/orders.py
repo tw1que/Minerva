@@ -144,7 +144,7 @@ def get_order(
     lines_stmt = (
         select(
             OrderLine,
-            Item.sku.label("item_sku"),
+            Item.product_code.label("item_product_code"),
             ItemTemplate.name.label("template_name"),
         )
         .join(Item, OrderLine.item_id == Item.id)
@@ -154,14 +154,14 @@ def get_order(
 
     rows = db.execute(lines_stmt).all()
     lines: list[OrderLineRead] = []
-    for line, item_sku, template_name in rows:
+    for line, item_product_code, template_name in rows:
         available = get_available_qty(db, line.item_id)
         lines.append(
             OrderLineRead(
                 id=line.id,
                 order_id=line.order_id,
                 item_id=line.item_id,
-                item_sku=item_sku,
+                item_product_code=item_product_code,
                 template_name=template_name,
                 qty_requested=line.qty_requested,
                 qty_allocated=line.qty_allocated,
@@ -226,7 +226,7 @@ def add_order_line(
         id=line.id,
         order_id=line.order_id,
         item_id=line.item_id,
-        item_sku=item.sku,
+        item_product_code=item.product_code,
         template_name=item.template.name,
         qty_requested=line.qty_requested,
         qty_allocated=line.qty_allocated,
@@ -276,7 +276,7 @@ def allocate_order(
         id=line.id,
         order_id=line.order_id,
         item_id=line.item_id,
-        item_sku=line.item.sku,
+        item_product_code=line.item.product_code,
         template_name=line.item.template.name,
         qty_requested=line.qty_requested,
         qty_allocated=line.qty_allocated,

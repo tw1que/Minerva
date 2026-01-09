@@ -68,6 +68,14 @@ class TemplateFieldType(enum.Enum):
     ENUM = "ENUM"
 
 
+class AttributeType(enum.Enum):
+    ENUM = "enum"
+    INT = "int"
+    DECIMAL = "decimal"
+    STRING = "string"
+    BOOL = "bool"
+
+
 class StockReason(enum.Enum):
     RECEIPT = "RECEIPT"
     CONSUME = "CONSUME"
@@ -144,6 +152,9 @@ class ItemTemplate(Base, TimestampMixin, SoftActiveMixin):
         Enum(SKUSequenceScope, name="sku_sequence_scope"),
         nullable=False,
     )
+
+    attribute_specs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    sku_rule: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     fields: Mapped[list["TemplateField"]] = relationship(
         back_populates="template",
@@ -226,11 +237,12 @@ class Item(Base, TimestampMixin, SoftActiveMixin):
         index=True,
     )
 
-    sku: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    product_code: Mapped[str] = mapped_column(String, nullable=False, index=True)
     uom: Mapped[str] = mapped_column(String, nullable=False)
 
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    attributes_hash: Mapped[str] = mapped_column(String, nullable=False)
+    attribute_hash: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    sku_rule_version: Mapped[int | None] = mapped_column(Integer)
 
     track_lots: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
@@ -239,11 +251,12 @@ class Item(Base, TimestampMixin, SoftActiveMixin):
     order_lines: Mapped[list["OrderLine"]] = relationship(back_populates="item")
 
     __table_args__ = (
-        UniqueConstraint("template_id", "attributes_hash", name="uq_item_variant"),
+        UniqueConstraint("template_id", "attribute_hash", name="uq_item_variant"),
+        UniqueConstraint("template_id", "product_code", name="uq_item_product_code"),
     )
 
     def __repr__(self) -> str:
-        return f"<Item id={self.id} sku={self.sku!r} template_id={self.template_id}>"
+        return f"<Item id={self.id} product_code={self.product_code!r} template_id={self.template_id}>"
 
 
 # -----------------------------
@@ -261,6 +274,8 @@ class Lot(Base, TimestampMixin, SoftActiveMixin):
     )
 
     lot_code: Mapped[str] = mapped_column(String, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    instance_sku: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     supplier_name: Mapped[str | None] = mapped_column(String)
 
@@ -279,6 +294,8 @@ class Lot(Base, TimestampMixin, SoftActiveMixin):
 
     __table_args__ = (
         UniqueConstraint("item_id", "lot_code", name="uq_lot_per_item"),
+        UniqueConstraint("item_id", "seq", name="uq_lot_item_seq"),
+        UniqueConstraint("instance_sku", name="uq_lot_instance_sku"),
         CheckConstraint(
             "(expires_at IS NULL OR manufacturing_date IS NULL OR expires_at > manufacturing_date)",
             name="ck_lot_expiry_after_mfg",

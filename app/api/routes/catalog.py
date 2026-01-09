@@ -38,7 +38,7 @@ def list_catalog_items(
         pattern = f"%{search}%"
         stmt = stmt.where(
             or_(
-                Item.sku.ilike(pattern),
+                Item.product_code.ilike(pattern),
                 ItemTemplate.name.ilike(pattern),
                 Manufacturer.name.ilike(pattern),
             )
@@ -54,7 +54,7 @@ def list_catalog_items(
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
 
     rows = (
-        db.execute(stmt.order_by(Item.sku).offset(offset).limit(page_size))
+        db.execute(stmt.order_by(Item.product_code).offset(offset).limit(page_size))
         .all()
     )
 
@@ -63,7 +63,7 @@ def list_catalog_items(
         items.append(
             CatalogItemRead(
                 id=item.id,
-                sku=item.sku,
+                product_code=item.product_code,
                 template_id=item.template_id,
                 template_name=template_name,
                 manufacturer_id=manufacturer_id_value,

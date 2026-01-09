@@ -69,7 +69,7 @@ def create_movement(
         id=movement.id,
         created_at=movement.created_at,
         item_id=item.id,
-        item_sku=item.sku,
+        item_product_code=item.product_code,
         template_name=item.template.name,
         lot_id=movement.lot_id,
         qty_delta=movement.qty_delta,
@@ -92,7 +92,7 @@ def list_movements(
     stmt = (
         select(
             StockMovement,
-            Item.sku.label("item_sku"),
+            Item.product_code.label("item_product_code"),
             ItemTemplate.name.label("template_name"),
         )
         .join(Item, StockMovement.item_id == Item.id)
@@ -102,7 +102,7 @@ def list_movements(
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(
-            or_(Item.sku.ilike(pattern), ItemTemplate.name.ilike(pattern))
+            or_(Item.product_code.ilike(pattern), ItemTemplate.name.ilike(pattern))
         )
 
     if item_id:
@@ -123,13 +123,13 @@ def list_movements(
     )
 
     items: list[MovementRead] = []
-    for movement, item_sku, template_name in rows:
+    for movement, item_product_code, template_name in rows:
         items.append(
             MovementRead(
                 id=movement.id,
                 created_at=movement.created_at,
                 item_id=movement.item_id,
-                item_sku=item_sku,
+                item_product_code=item_product_code,
                 template_name=template_name,
                 lot_id=movement.lot_id,
                 qty_delta=movement.qty_delta,

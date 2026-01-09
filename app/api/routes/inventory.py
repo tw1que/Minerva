@@ -49,7 +49,7 @@ def inventory_summary(
     stmt = (
         select(
             Item.id.label("item_id"),
-            Item.sku,
+            Item.product_code,
             Item.uom,
             ItemTemplate.name.label("template_name"),
             Manufacturer.name.label("manufacturer_name"),
@@ -67,7 +67,7 @@ def inventory_summary(
         pattern = f"%{search}%"
         stmt = stmt.where(
             or_(
-                Item.sku.ilike(pattern),
+                Item.product_code.ilike(pattern),
                 ItemTemplate.name.ilike(pattern),
                 Manufacturer.name.ilike(pattern),
             )
@@ -83,7 +83,7 @@ def inventory_summary(
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
 
     rows = (
-        db.execute(stmt.order_by(Item.sku).offset(offset).limit(page_size)).all()
+        db.execute(stmt.order_by(Item.product_code).offset(offset).limit(page_size)).all()
     )
 
     items: list[InventorySummaryRead] = []
@@ -93,7 +93,7 @@ def inventory_summary(
         items.append(
             InventorySummaryRead(
                 item_id=row.item_id,
-                sku=row.sku,
+                product_code=row.product_code,
                 template_name=row.template_name,
                 manufacturer_name=row.manufacturer_name,
                 uom=row.uom,

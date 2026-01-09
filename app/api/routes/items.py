@@ -1,16 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
-from app.db.models import Item, ItemTemplate, UserRole
-from app.db.models import compute_attributes_hash
+from app.api.pagination import normalize_pagination
+from app.db.models import Item, UserRole
 from app.schemas.item import ItemCreate, ItemRead
-from app.services.attributes import AttributeValidationError, normalize_attributes, to_jsonable
-from app.services.sku import SKUGenerationError, generate_sku
+from app.schemas.pagination import Page
+from app.services.attributes import AttributeValidationError, TemplateSpecError
+from app.services.items import (
+    ItemVariantConflictError,
+    TemplateNotFoundError,
+    create_item_variant,
+)
+from app.services.sku import SKUGenerationError
 
 router = APIRouter(prefix="/items")
 
@@ -18,52 +23,27 @@ router = APIRouter(prefix="/items")
 @router.post("/", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
 def create_item(
     payload: ItemCreate,
+    response: Response,
     db: Session = Depends(get_db),
     _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> Item:
-    template = db.get(ItemTemplate, payload.template_id)
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found.")
-
     try:
-        normalized = normalize_attributes(list(template.fields), payload.attributes)
-    except AttributeValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    normalized = to_jsonable(normalized)
-    attr_hash = compute_attributes_hash(normalized)
-
-    existing = db.execute(
-        select(Item).where(
-            Item.template_id == template.id,
-            Item.attributes_hash == attr_hash,
+        item, created = create_item_variant(
+            db,
+            payload.template_id,
+            payload.attributes,
+            uom=payload.uom,
+            track_lots=payload.track_lots,
         )
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Item variant already exists.")
+    except TemplateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (AttributeValidationError, TemplateSpecError, SKUGenerationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ItemVariantConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    try:
-        sku = generate_sku(db, template, normalized)
-    except SKUGenerationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    item = Item(
-        template_id=template.id,
-        sku=sku,
-        uom=payload.uom,
-        attributes=normalized,
-        attributes_hash=attr_hash,
-        track_lots=payload.track_lots,
-    )
-
-    try:
-        db.add(item)
-        db.commit()
-        db.refresh(item)
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="SKU already exists.") from exc
-
+    if not created:
+        response.status_code = status.HTTP_200_OK
     return item
 
 
@@ -76,3 +56,24 @@ def get_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
     return item
+
+
+@router.get("/", response_model=Page[ItemRead])
+def list_items(
+    template_id: int | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+) -> dict:
+    stmt = select(Item)
+    if template_id:
+        stmt = stmt.where(Item.template_id == template_id)
+
+    page, page_size, offset = normalize_pagination(page, page_size)
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+    items = (
+        db.execute(stmt.order_by(Item.product_code).offset(offset).limit(page_size))
+        .scalars()
+        .all()
+    )
+    return {"items": list(items), "page": page, "page_size": page_size, "total": total}

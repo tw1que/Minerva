@@ -21,6 +21,8 @@ class LotRead(ORMBase):
     id: int
     item_id: int
     lot_code: str
+    seq: int
+    instance_sku: str
     supplier_name: str | None
     manufacturing_date: datetime | None
     received_at: datetime

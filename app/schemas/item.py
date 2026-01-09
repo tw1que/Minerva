@@ -15,13 +15,20 @@ class ItemCreate(BaseModel):
     track_lots: bool = True
 
 
+class ItemVariantCreate(BaseModel):
+    uom: str
+    attributes: dict[str, Any]
+    track_lots: bool = True
+
+
 class ItemRead(ORMBase):
     id: int
     template_id: int
-    sku: str
+    product_code: str
     uom: str
     attributes: dict[str, Any]
-    attributes_hash: str
+    attribute_hash: str
+    sku_rule_version: int | None
     track_lots: bool
     active: bool
     created_at: datetime
