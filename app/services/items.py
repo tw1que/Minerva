@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import Item, ItemTemplate
 from app.services.attributes import compute_attribute_hash, validate_and_normalize_attributes
 from app.services.sku import build_product_code
@@ -16,6 +17,10 @@ class TemplateNotFoundError(LookupError):
 
 
 class ItemVariantConflictError(ValueError):
+    pass
+
+
+class MedicalTraceabilityError(ValueError):
     pass
 
 
@@ -43,6 +48,9 @@ def create_item_variant(
     template = db.get(ItemTemplate, template_id)
     if not template:
         raise TemplateNotFoundError("Template not found.")
+
+    if settings.medical_traceability and not track_lots:
+        raise MedicalTraceabilityError("Medical traceability requires lot tracking.")
 
     canonical = validate_and_normalize_attributes(template, attrs)
     attribute_hash = compute_attribute_hash(template, canonical)

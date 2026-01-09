@@ -1,5 +1,7 @@
 const apiPrefix = "/api";
 
+const medicalTraceability = document.body?.dataset.medicalTraceability === "true";
+
 const state = {
   token: localStorage.getItem("minerva_token"),
   user: null,
@@ -44,6 +46,8 @@ const itemForm = document.getElementById("item-form");
 const itemTemplateSelect = document.getElementById("item-template-select");
 const itemAttributesContainer = document.getElementById("item-attributes");
 const itemAttributesJson = document.getElementById("item-attributes-json");
+const medicalTraceabilityTag = document.getElementById("medical-traceability-tag");
+const medicalItemNote = document.getElementById("medical-item-note");
 
 const inventorySearch = document.getElementById("inventory-search");
 const inventoryManufacturer = document.getElementById("inventory-manufacturer");
@@ -75,6 +79,7 @@ const movementSearch = document.getElementById("movement-search");
 const movementFilterReason = document.getElementById("movement-filter-reason");
 const movementFilter = document.getElementById("movement-filter");
 const movementsTableBody = document.querySelector("#movements-table tbody");
+const medicalMovementNote = document.getElementById("medical-movement-note");
 
 const orderForm = document.getElementById("order-form");
 const orderNumber = document.getElementById("order-number");
@@ -290,6 +295,28 @@ function updateUserUI() {
     logoutButton.disabled = true;
   }
   applyRole();
+}
+
+function applyMedicalTraceabilityUI() {
+  if (!medicalTraceability) {
+    return;
+  }
+
+  medicalTraceabilityTag?.classList.remove("is-hidden");
+  medicalItemNote?.classList.remove("is-hidden");
+  medicalMovementNote?.classList.remove("is-hidden");
+
+  const trackLotsInput = itemForm.querySelector("[name='track_lots']");
+  if (trackLotsInput) {
+    trackLotsInput.checked = true;
+    trackLotsInput.disabled = true;
+  }
+
+  movementQty.value = "1";
+  movementQty.step = "1";
+  movementQty.min = "1";
+  movementQty.max = "1";
+  movementQty.readOnly = true;
 }
 
 function clearSession(message) {
@@ -1284,6 +1311,9 @@ function resetMovementForm() {
   lotCreate.classList.add("is-hidden");
   movementLot.innerHTML = "<option value=''>Select lot</option>";
   updateMovementReasons();
+  if (medicalTraceability) {
+    movementQty.value = "1";
+  }
 }
 
 function safeLoad(loader, label) {
@@ -1456,6 +1486,12 @@ itemForm.addEventListener("submit", async (event) => {
 
     setStatus(status, "Item saved.", "success");
     itemForm.reset();
+    if (medicalTraceability) {
+      const trackLotsInput = itemForm.querySelector("[name='track_lots']");
+      if (trackLotsInput) {
+        trackLotsInput.checked = true;
+      }
+    }
     itemAttributesContainer.innerHTML = "<p class='muted'>Select a template to enter attributes.</p>";
     itemAttributesJson.value = "";
     await loadCatalog();
@@ -1511,6 +1547,9 @@ movementForm.addEventListener("submit", async (event) => {
     if (!qty || qty <= 0) {
       throw new Error("Quantity must be greater than zero.");
     }
+    if (medicalTraceability && qty !== 1) {
+      throw new Error("Medical traceability requires quantity of 1.");
+    }
 
     const type = movementType.value;
     const signedQty = type === "outbound" ? -Math.abs(qty) : Math.abs(qty);
@@ -1533,6 +1572,9 @@ movementForm.addEventListener("submit", async (event) => {
         body: lotPayload,
       });
       lotId = lot.id;
+    }
+    if (medicalTraceability && !lotId) {
+      throw new Error("Select or create a lot for item-level traceability.");
     }
 
     const payload = {
@@ -1642,6 +1684,7 @@ function init() {
   templateForm.querySelector("[name='freeze_existing_skus']").checked = true;
   updateMovementReasons();
   resetMovementForm();
+  applyMedicalTraceabilityUI();
 
   safeLoad(loadManufacturers, "Manufacturers");
   safeLoad(loadTemplates, "Templates");

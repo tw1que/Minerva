@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
 from app.api.pagination import normalize_pagination
+from app.core.config import settings
 from app.db.models import Item, ItemTemplate, Lot, StockMovement, StockReason, UserRole
 from app.schemas.movement import MovementCreate, MovementRead
 from app.schemas.pagination import Page
@@ -34,6 +35,23 @@ def create_movement(
 
     if payload.qty_delta == 0:
         raise HTTPException(status_code=400, detail="Quantity cannot be zero.")
+
+    if settings.medical_traceability:
+        if payload.lot_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Medical traceability requires a lot for each movement.",
+            )
+        if abs(payload.qty_delta) != Decimal("1"):
+            raise HTTPException(
+                status_code=400,
+                detail="Medical traceability requires movement quantity of 1 per item.",
+            )
+        if not item.track_lots:
+            raise HTTPException(
+                status_code=400,
+                detail="Medical traceability requires items to track lots.",
+            )
 
     if payload.reason == StockReason.ADJUST and not payload.comment:
         raise HTTPException(status_code=400, detail="Adjustment requires a comment.")

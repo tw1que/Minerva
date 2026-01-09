@@ -12,7 +12,7 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-medical-traceability="{{ 'true' if medical_traceability else 'false' }}">
     <header class="hero">
       <div class="hero__grid"></div>
       <div class="hero__content">
@@ -22,6 +22,9 @@
             <h1>Inventory Forge</h1>
             <p class="lead">
               Define attribute specs and product code rules, then spin variants fast.
+            </p>
+            <p class="tag is-hidden" id="medical-traceability-tag">
+              Medical traceability mode enabled
             </p>
           </div>
           <div class="user-panel">
@@ -193,6 +196,9 @@
                 <input type="checkbox" name="track_lots" checked />
                 Track Lots
               </label>
+              <p class="muted is-hidden" id="medical-item-note">
+                Medical mode forces lot tracking for each item.
+              </p>
               <div id="item-attributes" class="attribute-grid">
                 <p class="muted">Select a template to enter attributes.</p>
               </div>
@@ -351,6 +357,9 @@
                   <input id="movement-uom" type="text" placeholder="kg" required />
                 </label>
               </div>
+              <p class="muted is-hidden" id="medical-movement-note">
+                Medical mode records movements per item (quantity fixed to 1).
+              </p>
               <label>
                 Lot
                 <select id="movement-lot"></select>
@@ -358,8 +367,8 @@
               <button type="button" class="ghost" id="lot-toggle">Create new lot</button>
               <div id="lot-create" class="lot-create is-hidden">
                 <label>
-                  Lot Code
-                  <input id="lot-code" type="text" placeholder="LOT-2026-01" />
+                  Lot Code / Barcode
+                  <input id="lot-code" type="text" placeholder="Scan or enter barcode" />
                 </label>
                 <label>
                   Supplier

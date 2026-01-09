@@ -12,6 +12,7 @@ from app.schemas.pagination import Page
 from app.services.attributes import AttributeValidationError, TemplateSpecError
 from app.services.items import (
     ItemVariantConflictError,
+    MedicalTraceabilityError,
     TemplateNotFoundError,
     create_item_variant,
 )
@@ -41,6 +42,8 @@ def create_item(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ItemVariantConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MedicalTraceabilityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if not created:
         response.status_code = status.HTTP_200_OK

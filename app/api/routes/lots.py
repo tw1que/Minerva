@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
 from app.api.pagination import normalize_pagination
+from app.core.config import settings
 from app.db.models import Item, Lot, UserRole
 from app.schemas.lot import LotCreate, LotRead
 from app.schemas.pagination import Page
@@ -24,6 +25,12 @@ def create_lot(
     item = db.get(Item, payload.item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
+
+    if settings.medical_traceability and not item.track_lots:
+        raise HTTPException(
+            status_code=400,
+            detail="Medical traceability requires items to track lots.",
+        )
 
     try:
         with db.begin():

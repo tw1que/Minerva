@@ -45,6 +45,7 @@ Key variables:
 - `SECRET_KEY`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`
 - `INITIAL_ADMIN_USERNAME`, `INITIAL_ADMIN_PASSWORD`
 - `CORS_ORIGINS` as JSON list string
+- `MEDICAL_TRACEABILITY` (true to enforce item-level lot movements)
 
 ## Notes
 

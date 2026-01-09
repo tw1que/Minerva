@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     initial_admin_password: str = Field(default="admin123", alias="INITIAL_ADMIN_PASSWORD")
 
     cors_origins: list[str] = Field(default_factory=list, alias="CORS_ORIGINS")
+    medical_traceability: bool = Field(default=False, alias="MEDICAL_TRACEABILITY")
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
