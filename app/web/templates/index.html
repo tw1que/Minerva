@@ -12,7 +12,7 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-medical-traceability="{{ 'true' if medical_traceability else 'false' }}">
     <header class="hero">
       <div class="hero__grid"></div>
       <div class="hero__content">
@@ -21,7 +21,10 @@
             <p class="eyebrow">Minerva // Brutalist Inventory</p>
             <h1>Inventory Forge</h1>
             <p class="lead">
-              Operate templates, lots, and stock without touching JSON.
+              Define attribute specs and product code rules, then spin variants fast.
+            </p>
+            <p class="tag is-hidden" id="medical-traceability-tag">
+              Medical traceability mode enabled
             </p>
           </div>
           <div class="user-panel">
@@ -50,7 +53,7 @@
               <div class="panel__filters">
                 <label>
                   Search
-                  <input id="catalog-search" type="search" placeholder="SKU or template" />
+                  <input id="catalog-search" type="search" placeholder="Product code or template" />
                 </label>
                 <label>
                   Manufacturer
@@ -75,7 +78,7 @@
               <table class="table" id="catalog-table">
                 <thead>
                   <tr>
-                    <th>SKU</th>
+                    <th>Product Code</th>
                     <th>Template</th>
                     <th>Manufacturer</th>
                     <th>Attributes</th>
@@ -98,7 +101,7 @@
               <div class="form-status" data-status></div>
               <label>
                 Template Name
-                <input name="name" type="text" placeholder="Steel Bar" required />
+                <input name="name" type="text" placeholder="Blanks voor freesmachine" required />
               </label>
               <label>
                 Manufacturer
@@ -108,40 +111,70 @@
                   data-placeholder="No manufacturer"
                 ></select>
               </label>
-              <div class="split">
+
+              <div class="rule-builder">
+                <div class="rule-builder__header">
+                  <h3>Product Code Rule</h3>
+                  <p class="muted">Prefix + ordered tokens, no property prefixes.</p>
+                </div>
+                <div class="split">
+                  <label>
+                    Prefix
+                    <input name="sku_prefix" type="text" placeholder="BLK" required />
+                  </label>
+                  <label>
+                    Separator
+                    <input name="sku_separator" type="text" placeholder="-" />
+                  </label>
+                </div>
                 <label>
-                  SKU Prefix
-                  <input name="sku_prefix" type="text" placeholder="STB" required />
-                </label>
-                <label>
-                  SKU Pattern
+                  Tokens (ordered, comma-separated)
                   <input
-                    name="sku_pattern"
+                    name="sku_tokens"
                     type="text"
-                    placeholder="{prefix}-{seq:04d}"
+                    placeholder="diameter, thickness, color, type"
                     required
                   />
                 </label>
+                <div class="split">
+                  <label>
+                    Rule Version
+                    <input name="sku_version" type="number" min="1" value="1" />
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" name="freeze_existing_skus" checked />
+                    Freeze existing product codes
+                  </label>
+                </div>
+                <details class="advanced">
+                  <summary>Advanced: product code rule JSON override</summary>
+                  <textarea
+                    id="template-sku-json"
+                    rows="6"
+                    placeholder='{"prefix":"BLK","separator":"-","tokens":["diameter","thickness","color","type"],"version":1,"freeze_existing_skus":true}'
+                  ></textarea>
+                </details>
               </div>
-              <label>
-                Sequence Scope
-                <select name="seq_scope">
-                  <option value="GLOBAL">GLOBAL</option>
-                  <option value="PER_TEMPLATE">PER_TEMPLATE</option>
-                  <option value="PER_PREFIX">PER_PREFIX</option>
-                  <option value="PER_YEAR">PER_YEAR</option>
-                </select>
-              </label>
 
               <div class="field-builder">
                 <div class="field-builder__header">
-                  <h3>Template Fields</h3>
-                  <button type="button" class="ghost" id="add-template-field">
-                    Add Field
+                  <h3>Attribute Specs</h3>
+                  <button type="button" class="ghost" id="add-template-spec">
+                    Add Spec
                   </button>
                 </div>
-                <div id="template-fields"></div>
+                <p class="muted">Use allowed values or a range, plus optional product code mapping.</p>
+                <div id="template-specs"></div>
               </div>
+
+              <details class="advanced">
+                <summary>Advanced: Attribute specs JSON override</summary>
+                <textarea
+                  id="template-specs-json"
+                  rows="8"
+                  placeholder='[{"key":"diameter","type":"int","required":true,"allowed_values":[95,98]}]'
+                ></textarea>
+              </details>
 
               <button type="submit">Save Template</button>
             </form>
@@ -163,6 +196,9 @@
                 <input type="checkbox" name="track_lots" checked />
                 Track Lots
               </label>
+              <p class="muted is-hidden" id="medical-item-note">
+                Medical mode forces lot tracking for each item.
+              </p>
               <div id="item-attributes" class="attribute-grid">
                 <p class="muted">Select a template to enter attributes.</p>
               </div>
@@ -191,7 +227,7 @@
               <div class="panel__filters">
                 <label>
                   Search
-                  <input id="inventory-search" type="search" placeholder="SKU or template" />
+                  <input id="inventory-search" type="search" placeholder="Product code or template" />
                 </label>
                 <label>
                   Manufacturer
@@ -216,7 +252,7 @@
               <table class="table" id="inventory-table">
                 <thead>
                   <tr>
-                    <th>SKU</th>
+                    <th>Product Code</th>
                     <th>Template</th>
                     <th>Manufacturer</th>
                     <th>On Hand</th>
@@ -250,7 +286,8 @@
                   <table class="table" id="inventory-lots-table">
                     <thead>
                       <tr>
-                        <th>Lot</th>
+                        <th>Instance SKU</th>
+                        <th>Lot Code</th>
                         <th>Supplier</th>
                         <th>Received</th>
                         <th>Expires</th>
@@ -293,7 +330,7 @@
                   id="movement-item-search"
                   type="search"
                   list="movement-item-options"
-                  placeholder="Search SKU or template"
+                  placeholder="Search product code or template"
                 />
                 <datalist id="movement-item-options"></datalist>
               </label>
@@ -320,6 +357,9 @@
                   <input id="movement-uom" type="text" placeholder="kg" required />
                 </label>
               </div>
+              <p class="muted is-hidden" id="medical-movement-note">
+                Medical mode records movements per item (quantity fixed to 1).
+              </p>
               <label>
                 Lot
                 <select id="movement-lot"></select>
@@ -327,8 +367,8 @@
               <button type="button" class="ghost" id="lot-toggle">Create new lot</button>
               <div id="lot-create" class="lot-create is-hidden">
                 <label>
-                  Lot Code
-                  <input id="lot-code" type="text" placeholder="LOT-2026-01" />
+                  Lot Code / Barcode
+                  <input id="lot-code" type="text" placeholder="Scan or enter barcode" />
                 </label>
                 <label>
                   Supplier
@@ -360,7 +400,7 @@
               <div class="panel__filters">
                 <label>
                   Search
-                  <input id="movement-search" type="search" placeholder="SKU or template" />
+                  <input id="movement-search" type="search" placeholder="Product code or template" />
                 </label>
                 <label>
                   Reason
@@ -382,7 +422,7 @@
                 <thead>
                   <tr>
                     <th>Date</th>
-                    <th>SKU</th>
+                    <th>Product Code</th>
                     <th>Template</th>
                     <th>Qty</th>
                     <th>Reason</th>
@@ -481,7 +521,7 @@
                     id="order-item-search"
                     type="search"
                     list="order-item-options"
-                    placeholder="Search SKU or template"
+                    placeholder="Search product code or template"
                   />
                   <datalist id="order-item-options"></datalist>
                 </label>
@@ -495,7 +535,7 @@
                 <table class="table" id="order-lines-table">
                   <thead>
                     <tr>
-                      <th>SKU</th>
+                      <th>Product Code</th>
                       <th>Template</th>
                       <th>Requested</th>
                       <th>Allocated</th>

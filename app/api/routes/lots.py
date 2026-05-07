@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
 from app.api.pagination import normalize_pagination
+from app.core.config import settings
 from app.db.models import Item, Lot, UserRole
 from app.schemas.lot import LotCreate, LotRead
 from app.schemas.pagination import Page
+from app.services.inventory import LookupNotFoundError, create_lot_snapshot
 
 router = APIRouter(prefix="/lots")
 
@@ -24,25 +25,36 @@ def create_lot(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
 
-    lot = Lot(
-        item_id=payload.item_id,
-        lot_code=payload.lot_code,
-        supplier_name=payload.supplier_name,
-        manufacturing_date=payload.manufacturing_date,
-        expires_at=payload.expires_at,
-        certificate_ref=payload.certificate_ref,
-        notes=payload.notes,
-    )
+    if settings.medical_traceability and not item.track_lots:
+        raise HTTPException(
+            status_code=400,
+            detail="Medical traceability requires items to track lots.",
+        )
 
     try:
-        db.add(lot)
+        lot = create_lot_snapshot(
+            db,
+            item=item,
+            manufacturer_id=payload.manufacturer_id,
+            material_class_id=payload.material_class_id,
+            shade_id=payload.shade_id,
+            manufacturer_lot_code=payload.manufacturer_lot_code or payload.lot_code,
+            supplier_name=payload.supplier_name,
+            manufacturing_date=payload.manufacturing_date,
+            expires_at=payload.expires_at,
+            certificate_ref=payload.certificate_ref,
+            notes=payload.notes,
+        )
         db.commit()
         db.refresh(lot)
-    except IntegrityError as exc:
+    except LookupNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         db.rollback()
         raise HTTPException(
-            status_code=409,
-            detail="Lot already exists or violates constraints.",
+            status_code=400,
+            detail=str(exc),
         ) from exc
 
     return lot

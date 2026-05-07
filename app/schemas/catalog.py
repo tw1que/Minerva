@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 class CatalogItemRead(BaseModel):
     id: int
-    sku: str
+    product_code: str
     template_id: int
     template_name: str
     manufacturer_id: int | None

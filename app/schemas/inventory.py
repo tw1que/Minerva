@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 class InventorySummaryRead(BaseModel):
     item_id: int
-    sku: str
+    product_code: str
     template_name: str
     manufacturer_name: str | None
     uom: str

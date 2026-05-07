@@ -1,5 +1,7 @@
 const apiPrefix = "/api";
 
+const medicalTraceability = document.body?.dataset.medicalTraceability === "true";
+
 const state = {
   token: localStorage.getItem("minerva_token"),
   user: null,
@@ -35,13 +37,17 @@ const catalogFilter = document.getElementById("catalog-filter");
 const catalogTableBody = document.querySelector("#catalog-table tbody");
 
 const templateForm = document.getElementById("template-form");
-const addTemplateField = document.getElementById("add-template-field");
-const templateFieldsContainer = document.getElementById("template-fields");
+const addTemplateSpec = document.getElementById("add-template-spec");
+const templateSpecsContainer = document.getElementById("template-specs");
+const templateSpecsJson = document.getElementById("template-specs-json");
+const templateSkuJson = document.getElementById("template-sku-json");
 
 const itemForm = document.getElementById("item-form");
 const itemTemplateSelect = document.getElementById("item-template-select");
 const itemAttributesContainer = document.getElementById("item-attributes");
 const itemAttributesJson = document.getElementById("item-attributes-json");
+const medicalTraceabilityTag = document.getElementById("medical-traceability-tag");
+const medicalItemNote = document.getElementById("medical-item-note");
 
 const inventorySearch = document.getElementById("inventory-search");
 const inventoryManufacturer = document.getElementById("inventory-manufacturer");
@@ -73,6 +79,7 @@ const movementSearch = document.getElementById("movement-search");
 const movementFilterReason = document.getElementById("movement-filter-reason");
 const movementFilter = document.getElementById("movement-filter");
 const movementsTableBody = document.querySelector("#movements-table tbody");
+const medicalMovementNote = document.getElementById("medical-movement-note");
 
 const orderForm = document.getElementById("order-form");
 const orderNumber = document.getElementById("order-number");
@@ -290,6 +297,28 @@ function updateUserUI() {
   applyRole();
 }
 
+function applyMedicalTraceabilityUI() {
+  if (!medicalTraceability) {
+    return;
+  }
+
+  medicalTraceabilityTag?.classList.remove("is-hidden");
+  medicalItemNote?.classList.remove("is-hidden");
+  medicalMovementNote?.classList.remove("is-hidden");
+
+  const trackLotsInput = itemForm.querySelector("[name='track_lots']");
+  if (trackLotsInput) {
+    trackLotsInput.checked = true;
+    trackLotsInput.disabled = true;
+  }
+
+  movementQty.value = "1";
+  movementQty.step = "1";
+  movementQty.min = "1";
+  movementQty.max = "1";
+  movementQty.readOnly = true;
+}
+
 function clearSession(message) {
   state.token = null;
   state.user = null;
@@ -365,46 +394,156 @@ function setupPagers() {
   });
 }
 
-function addTemplateFieldRow() {
+function parseCommaList(value) {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseKeyValueMap(value) {
+  if (!value) {
+    return null;
+  }
+  const map = {};
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((pair) => {
+      const parts = pair.split("=");
+      if (parts.length < 2) {
+        return;
+      }
+      const key = parts.shift().trim();
+      const mapped = parts.join("=").trim();
+      if (!key || !mapped) {
+        return;
+      }
+      map[key] = mapped;
+    });
+  return Object.keys(map).length ? map : null;
+}
+
+function parseMaybeNumber(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+  const num = Number(text);
+  if (Number.isNaN(num)) {
+    return text;
+  }
+  return num;
+}
+
+function parseAllowedValue(value, type) {
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+  if (type === "int") {
+    const num = Number(text);
+    if (!Number.isInteger(num)) {
+      throw new Error(`Allowed value '${text}' must be an integer.`);
+    }
+    return num;
+  }
+  if (type === "decimal") {
+    const num = Number(text);
+    if (Number.isNaN(num)) {
+      throw new Error(`Allowed value '${text}' must be numeric.`);
+    }
+    return num;
+  }
+  if (type === "bool") {
+    const normalized = text.toLowerCase();
+    if (["true", "1", "yes", "y"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no", "n"].includes(normalized)) {
+      return false;
+    }
+    throw new Error(`Allowed value '${text}' must be boolean.`);
+  }
+  return text;
+}
+
+function addTemplateSpecRow() {
   const row = document.createElement("div");
   row.className = "field-row";
   row.innerHTML = `
     <label>
-      Field Key
-      <input type="text" class="field-key" placeholder="size" required />
+      Key
+      <input type="text" class="spec-key" placeholder="diameter" required />
     </label>
     <label>
       Type
-      <select class="field-type">
-        <option value="TEXT">TEXT</option>
-        <option value="INT">INT</option>
-        <option value="DECIMAL">DECIMAL</option>
-        <option value="ENUM">ENUM</option>
+      <select class="spec-type">
+        <option value="string">string</option>
+        <option value="int">int</option>
+        <option value="decimal">decimal</option>
+        <option value="enum">enum</option>
+        <option value="bool">bool</option>
       </select>
     </label>
     <label class="checkbox">
-      <input type="checkbox" class="field-required" />
+      <input type="checkbox" class="spec-required" />
       Required
     </label>
     <label class="checkbox">
-      <input type="checkbox" class="field-include" />
-      Include in SKU
+      <input type="checkbox" class="spec-identity" checked />
+      Identity
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" class="spec-sku" checked />
+      In SKU
     </label>
     <label>
-      SKU Order
-      <input type="number" class="field-order" min="0" />
+      Allowed Values
+      <input type="text" class="spec-values" placeholder="A1,A2" />
     </label>
     <label>
-      Default
-      <input type="text" class="field-default" />
+      Range Min
+      <input type="number" class="spec-min" step="0.001" />
     </label>
     <label>
-      Enum Values
-      <input type="text" class="field-enum" placeholder="A,B,C" />
+      Range Max
+      <input type="number" class="spec-max" step="0.001" />
     </label>
     <label>
-      Format
-      <input type="text" class="field-format" placeholder="upper | lower | title | zfill:4" />
+      Range Step
+      <input type="number" class="spec-step" step="0.001" />
+    </label>
+    <label>
+      Unit
+      <input type="text" class="spec-unit" placeholder="mm" />
+    </label>
+    <label>
+      Normalize Flags
+      <input type="text" class="spec-normalize" placeholder="lower,strip" />
+    </label>
+    <label>
+      Enum Map
+      <input type="text" class="spec-enum-map" placeholder="multi=multilayer" />
+    </label>
+    <label>
+      SKU Map
+      <input type="text" class="spec-sku-map" placeholder="multilayer=ML" />
+    </label>
+    <label>
+      SKU Pad Width
+      <input type="number" class="spec-pad" min="1" placeholder="2" />
+    </label>
+    <label>
+      Pad Char
+      <input type="text" class="spec-pad-char" maxlength="1" placeholder="0" />
     </label>
     <div class="field-actions">
       <button type="button" class="ghost field-remove">Remove</button>
@@ -413,100 +552,234 @@ function addTemplateFieldRow() {
   row.querySelector(".field-remove").addEventListener("click", () => {
     row.remove();
   });
-  templateFieldsContainer.appendChild(row);
+  templateSpecsContainer.appendChild(row);
 }
 
-function collectTemplateFields() {
-  const rows = templateFieldsContainer.querySelectorAll(".field-row");
-  const fields = [];
+function collectTemplateSpecs() {
+  const rows = templateSpecsContainer.querySelectorAll(".field-row");
+  const specs = [];
   rows.forEach((row) => {
-    const key = row.querySelector(".field-key").value.trim();
-    const type = row.querySelector(".field-type").value;
+    const key = row.querySelector(".spec-key").value.trim();
+    const type = row.querySelector(".spec-type").value;
     if (!key) {
-      throw new Error("Template field key is required.");
+      throw new Error("Attribute spec key is required.");
     }
-    const required = row.querySelector(".field-required").checked;
-    const includeInSku = row.querySelector(".field-include").checked;
-    const skuOrderRaw = row.querySelector(".field-order").value;
-    const skuOrder = skuOrderRaw ? Number(skuOrderRaw) : null;
-    const defaultValue = row.querySelector(".field-default").value.trim() || null;
-    const enumText = row.querySelector(".field-enum").value.trim();
-    let enumValues = null;
-    if (enumText) {
-      enumValues = {};
-      enumText
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .forEach((item) => {
-          enumValues[item] = item;
-        });
-    }
-    const format = row.querySelector(".field-format").value.trim() || null;
 
-    fields.push({
-      field_key: key,
-      field_type: type,
+    const required = row.querySelector(".spec-required").checked;
+    const includeInIdentity = row.querySelector(".spec-identity").checked;
+    const includeInSku = row.querySelector(".spec-sku").checked;
+
+    const valuesText = row.querySelector(".spec-values").value.trim();
+    const allowedValuesRaw = parseCommaList(valuesText);
+    const allowedValues = allowedValuesRaw.length
+      ? allowedValuesRaw
+          .map((value) => parseAllowedValue(value, type))
+          .filter((value) => value !== null)
+      : null;
+
+    const rangeMin = parseMaybeNumber(row.querySelector(".spec-min").value);
+    const rangeMax = parseMaybeNumber(row.querySelector(".spec-max").value);
+    const rangeStep = parseMaybeNumber(row.querySelector(".spec-step").value);
+    const hasRange = rangeMin !== null || rangeMax !== null || rangeStep !== null;
+    if (allowedValues && hasRange) {
+      throw new Error(`Spec '${key}' cannot have both allowed values and a range.`);
+    }
+    if (hasRange && !["int", "decimal"].includes(type)) {
+      throw new Error(`Spec '${key}' can only use ranges for int or decimal types.`);
+    }
+
+    let allowedRange = null;
+    if (hasRange) {
+      allowedRange = {};
+      if (rangeMin !== null) {
+        allowedRange.min = rangeMin;
+      }
+      if (rangeMax !== null) {
+        allowedRange.max = rangeMax;
+      }
+      if (rangeStep !== null) {
+        allowedRange.step = rangeStep;
+      }
+    }
+
+    if (type === "enum" && !allowedValues) {
+      throw new Error(`Enum spec '${key}' requires allowed values.`);
+    }
+
+    const unit = row.querySelector(".spec-unit").value.trim() || null;
+
+    const normalizeFlags = parseCommaList(row.querySelector(".spec-normalize").value);
+    const enumMap = parseKeyValueMap(row.querySelector(".spec-enum-map").value);
+    let normalize = null;
+    if (enumMap || normalizeFlags.length) {
+      if (enumMap) {
+        normalize = {};
+        normalizeFlags.forEach((flag) => {
+          normalize[flag] = true;
+        });
+        normalize.enum_map = enumMap;
+      } else {
+        normalize = normalizeFlags;
+      }
+    }
+
+    const skuMap = parseKeyValueMap(row.querySelector(".spec-sku-map").value);
+    const padWidthRaw = row.querySelector(".spec-pad").value.trim();
+    const padChar = row.querySelector(".spec-pad-char").value.trim();
+    let skuPad = null;
+    if (padWidthRaw) {
+      const padWidth = Number(padWidthRaw);
+      if (!Number.isInteger(padWidth) || padWidth <= 0) {
+        throw new Error(`SKU pad width must be a positive integer for '${key}'.`);
+      }
+      if (padChar) {
+        if (padChar.length !== 1) {
+          throw new Error(`Pad char must be a single character for '${key}'.`);
+        }
+        skuPad = { width: padWidth, char: padChar };
+      } else {
+        skuPad = padWidth;
+      }
+    } else if (padChar) {
+      throw new Error(`Pad width is required when pad char is set for '${key}'.`);
+    }
+
+    specs.push({
+      key,
+      type,
       required,
+      allowed_values: allowedValues,
+      allowed_range: allowedRange,
+      unit,
+      normalize,
+      sku_pad: skuPad,
+      sku_map: skuMap,
+      include_in_identity: includeInIdentity,
       include_in_sku: includeInSku,
-      sku_order: skuOrder,
-      default_value: defaultValue,
-      enum_values: enumValues,
-      format,
     });
   });
-  return fields;
+
+  if (!specs.length) {
+    throw new Error("Add at least one attribute spec.");
+  }
+
+  return specs;
 }
 
-function renderAttributeFields(fields) {
+function collectSkuRule() {
+  const prefix = templateForm.querySelector("[name='sku_prefix']").value.trim();
+  const separatorRaw = templateForm.querySelector("[name='sku_separator']").value.trim();
+  const tokensRaw = templateForm.querySelector("[name='sku_tokens']").value.trim();
+  const versionRaw = templateForm.querySelector("[name='sku_version']").value.trim();
+  const freezeExisting = templateForm.querySelector(
+    "[name='freeze_existing_skus']"
+  ).checked;
+
+  if (!prefix) {
+    throw new Error("SKU prefix is required.");
+  }
+  const separator = separatorRaw || "-";
+  const tokens = parseCommaList(tokensRaw);
+  if (!tokens.length) {
+    throw new Error("SKU tokens are required.");
+  }
+  const uniqueTokens = new Set(tokens);
+  if (uniqueTokens.size !== tokens.length) {
+    throw new Error("SKU tokens must be unique.");
+  }
+
+  let version = 1;
+  if (versionRaw) {
+    version = Number(versionRaw);
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new Error("SKU rule version must be a positive integer.");
+    }
+  }
+
+  return {
+    prefix,
+    separator,
+    tokens,
+    version,
+    freeze_existing_skus: freezeExisting,
+  };
+}
+
+function renderAttributeFields(specs) {
   itemAttributesContainer.innerHTML = "";
-  if (!fields || fields.length === 0) {
-    itemAttributesContainer.innerHTML = "<p class='muted'>No template fields defined.</p>";
+  if (!specs || specs.length === 0) {
+    itemAttributesContainer.innerHTML = "<p class='muted'>No attribute specs defined.</p>";
     return;
   }
 
-  fields.forEach((field) => {
+  specs.forEach((spec) => {
+    const type = String(spec.type || "string").toLowerCase();
     const label = document.createElement("label");
-    label.textContent = `${field.field_key} (${field.field_type})`;
-    let input;
+    const title = document.createElement("span");
+    title.textContent = `${spec.key} (${type})`;
+    label.appendChild(title);
 
-    if (field.field_type === "ENUM") {
+    if (spec.allowed_values && spec.allowed_values.length) {
+      const hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = `Allowed: ${spec.allowed_values.join(", ")}`;
+      label.appendChild(hint);
+    }
+
+    let input;
+    if (type === "enum" && spec.allowed_values && spec.allowed_values.length) {
       input = document.createElement("select");
-      const blankOption = document.createElement("option");
-      blankOption.value = "";
-      blankOption.textContent = "Select";
-      input.appendChild(blankOption);
-      if (field.enum_values) {
-        Object.entries(field.enum_values).forEach(([value, labelText]) => {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = labelText;
-          input.appendChild(option);
-        });
-      }
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Select";
+      input.appendChild(blank);
+      spec.allowed_values.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        input.appendChild(option);
+      });
+    } else if (type === "bool") {
+      input = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Select";
+      input.appendChild(blank);
+      ["true", "false"].forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        input.appendChild(option);
+      });
     } else {
       input = document.createElement("input");
-      if (field.field_type === "INT") {
+      if (type === "int" || type === "decimal") {
         input.type = "number";
-        input.step = "1";
-      } else if (field.field_type === "DECIMAL") {
-        input.type = "number";
-        input.step = "0.001";
+        input.step = type === "int" ? "1" : "0.001";
+        if (spec.allowed_range) {
+          if (spec.allowed_range.min !== undefined && spec.allowed_range.min !== null) {
+            input.min = spec.allowed_range.min;
+          }
+          if (spec.allowed_range.max !== undefined && spec.allowed_range.max !== null) {
+            input.max = spec.allowed_range.max;
+          }
+          if (spec.allowed_range.step !== undefined && spec.allowed_range.step !== null) {
+            input.step = spec.allowed_range.step;
+          }
+        }
       } else {
         input.type = "text";
       }
+      if (spec.unit) {
+        input.placeholder = spec.unit;
+      }
     }
 
-    input.dataset.fieldKey = field.field_key;
-    input.dataset.fieldType = field.field_type;
-    input.dataset.required = field.required ? "true" : "false";
+    input.dataset.fieldKey = spec.key;
+    input.dataset.fieldType = type;
+    input.dataset.required = spec.required ? "true" : "false";
 
-    if (field.default_value) {
-      input.value = field.default_value;
-      input.dataset.defaultValue = field.default_value;
-    }
-
-    if (field.required) {
+    if (spec.required) {
       input.required = true;
     }
 
@@ -522,33 +795,47 @@ function collectAttributes() {
     const key = input.dataset.fieldKey;
     const type = input.dataset.fieldType;
     const required = input.dataset.required === "true";
-    let value = input.value.trim();
+    const valueRaw = input.value.trim();
 
-    if (!value && input.dataset.defaultValue) {
-      value = input.dataset.defaultValue;
-    }
-
-    if (!value) {
+    if (!valueRaw) {
       if (required) {
         throw new Error(`${key} is required.`);
       }
       return;
     }
 
-    let parsed = value;
-    if (type === "INT") {
-      parsed = Number.parseInt(value, 10);
-      if (Number.isNaN(parsed)) {
+    if (type === "int") {
+      const parsed = Number(valueRaw);
+      if (!Number.isInteger(parsed)) {
         throw new Error(`${key} must be an integer.`);
       }
-    } else if (type === "DECIMAL") {
-      parsed = Number(value);
+      attributes[key] = parsed;
+      return;
+    }
+
+    if (type === "decimal") {
+      const parsed = Number(valueRaw);
       if (Number.isNaN(parsed)) {
         throw new Error(`${key} must be a number.`);
       }
+      attributes[key] = valueRaw;
+      return;
     }
 
-    attributes[key] = parsed;
+    if (type === "bool") {
+      const normalized = valueRaw.toLowerCase();
+      if (["true", "1", "yes", "y"].includes(normalized)) {
+        attributes[key] = true;
+        return;
+      }
+      if (["false", "0", "no", "n"].includes(normalized)) {
+        attributes[key] = false;
+        return;
+      }
+      throw new Error(`${key} must be true or false.`);
+    }
+
+    attributes[key] = valueRaw;
   });
 
   return attributes;
@@ -596,7 +883,7 @@ function populateTemplateSelect(templates) {
 async function fetchTemplate(templateId) {
   const id = Number(templateId);
   const cached = state.templates.get(id);
-  if (cached && cached.fields) {
+  if (cached && cached.attribute_specs) {
     return cached;
   }
   const template = await apiRequest(`/templates/${id}`);
@@ -605,7 +892,7 @@ async function fetchTemplate(templateId) {
 }
 
 function formatItemOption(item) {
-  return `${item.sku} - ${item.template_name}`;
+  return `${item.product_code} - ${item.template_name}`;
 }
 
 function findItemMatch(value, items) {
@@ -613,7 +900,7 @@ function findItemMatch(value, items) {
   return items.find((item) => {
     return (
       formatItemOption(item).toLowerCase() === normalized ||
-      item.sku.toLowerCase() === normalized
+      item.product_code.toLowerCase() === normalized
     );
   });
 }
@@ -702,7 +989,7 @@ async function loadCatalog(page = state.pages.catalog) {
       .map((item) => {
         return `
           <tr>
-            <td>${escapeHtml(item.sku)}</td>
+            <td>${escapeHtml(item.product_code)}</td>
             <td>${escapeHtml(item.template_name)}</td>
             <td>${escapeHtml(item.manufacturer_name || "-")}</td>
             <td>${escapeHtml(formatAttributes(item.attributes))}</td>
@@ -739,7 +1026,7 @@ async function loadInventory(page = state.pages.inventory) {
       .map((item) => {
         return `
           <tr>
-            <td>${escapeHtml(item.sku)}</td>
+            <td>${escapeHtml(item.product_code)}</td>
             <td>${escapeHtml(item.template_name)}</td>
             <td>${escapeHtml(item.manufacturer_name || "-")}</td>
             <td>${formatQty(item.on_hand)}</td>
@@ -767,7 +1054,7 @@ async function loadInventoryDetail(itemId) {
   state.activeInventoryId = itemId;
   const item = state.inventoryItems.get(itemId);
   if (item) {
-    inventoryDetailTitle.textContent = `${item.sku} - ${item.template_name}`;
+    inventoryDetailTitle.textContent = `${item.product_code} - ${item.template_name}`;
   } else {
     inventoryDetailTitle.textContent = `Item ${itemId}`;
   }
@@ -777,12 +1064,13 @@ async function loadInventoryDetail(itemId) {
   const lots = lotsData.items || [];
 
   if (lots.length === 0) {
-    inventoryLotsBody.innerHTML = "<tr><td colspan='4'>No lots.</td></tr>";
+    inventoryLotsBody.innerHTML = "<tr><td colspan='5'>No lots.</td></tr>";
   } else {
     inventoryLotsBody.innerHTML = lots
       .map((lot) => {
         return `
           <tr>
+            <td>${escapeHtml(lot.instance_sku)}</td>
             <td>${escapeHtml(lot.lot_code)}</td>
             <td>${escapeHtml(lot.supplier_name || "-")}</td>
             <td>${formatDate(lot.received_at)}</td>
@@ -827,7 +1115,7 @@ async function loadLotsForItem(itemId) {
   lots.forEach((lot) => {
     const option = document.createElement("option");
     option.value = lot.id;
-    option.textContent = lot.lot_code;
+    option.textContent = `${lot.instance_sku} (${lot.lot_code})`;
     movementLot.appendChild(option);
   });
 }
@@ -851,7 +1139,7 @@ async function loadMovements(page = state.pages.movements) {
         return `
           <tr>
             <td>${formatDateTime(move.created_at)}</td>
-            <td>${escapeHtml(move.item_sku)}</td>
+            <td>${escapeHtml(move.item_product_code)}</td>
             <td>${escapeHtml(move.template_name)}</td>
             <td>${formatQty(move.qty_delta)} ${escapeHtml(move.uom)}</td>
             <td>${escapeHtml(move.reason)}</td>
@@ -934,7 +1222,7 @@ async function loadOrderDetail(orderId) {
 
         return `
           <tr>
-            <td>${escapeHtml(line.item_sku)}</td>
+            <td>${escapeHtml(line.item_product_code)}</td>
             <td>${escapeHtml(line.template_name)}</td>
             <td>${formatQty(line.qty_requested)}</td>
             <td>${formatQty(line.qty_allocated)}</td>
@@ -1023,6 +1311,9 @@ function resetMovementForm() {
   lotCreate.classList.add("is-hidden");
   movementLot.innerHTML = "<option value=''>Select lot</option>";
   updateMovementReasons();
+  if (medicalTraceability) {
+    movementQty.value = "1";
+  }
 }
 
 function safeLoad(loader, label) {
@@ -1085,8 +1376,8 @@ orderFilter.addEventListener("click", () => {
   safeLoad(loadOrders, "Orders");
 });
 
-addTemplateField.addEventListener("click", () => {
-  addTemplateFieldRow();
+addTemplateSpec.addEventListener("click", () => {
+  addTemplateSpecRow();
 });
 
 templateForm.addEventListener("submit", async (event) => {
@@ -1098,11 +1389,31 @@ templateForm.addEventListener("submit", async (event) => {
     const payload = {
       name: templateForm.querySelector("[name='name']").value.trim(),
       manufacturer_id: templateForm.querySelector("[name='manufacturer_id']").value || null,
-      sku_prefix: templateForm.querySelector("[name='sku_prefix']").value.trim(),
-      sku_pattern: templateForm.querySelector("[name='sku_pattern']").value.trim(),
-      seq_scope: templateForm.querySelector("[name='seq_scope']").value,
-      fields: collectTemplateFields(),
+      attribute_specs: null,
+      sku_rule: null,
     };
+
+    const skuJson = templateSkuJson.value.trim();
+    if (skuJson) {
+      const parsedRule = JSON.parse(skuJson);
+      if (!parsedRule || typeof parsedRule !== "object" || Array.isArray(parsedRule)) {
+        throw new Error("SKU rule JSON must be an object.");
+      }
+      payload.sku_rule = parsedRule;
+    } else {
+      payload.sku_rule = collectSkuRule();
+    }
+
+    const specsJson = templateSpecsJson.value.trim();
+    if (specsJson) {
+      const parsedSpecs = JSON.parse(specsJson);
+      if (!Array.isArray(parsedSpecs)) {
+        throw new Error("Attribute specs JSON must be an array.");
+      }
+      payload.attribute_specs = parsedSpecs;
+    } else {
+      payload.attribute_specs = collectTemplateSpecs();
+    }
 
     if (payload.manufacturer_id) {
       payload.manufacturer_id = Number(payload.manufacturer_id);
@@ -1115,8 +1426,13 @@ templateForm.addEventListener("submit", async (event) => {
 
     setStatus(status, "Template created.", "success");
     templateForm.reset();
-    templateFieldsContainer.innerHTML = "";
-    addTemplateFieldRow();
+    templateSpecsContainer.innerHTML = "";
+    templateSpecsJson.value = "";
+    templateSkuJson.value = "";
+    addTemplateSpecRow();
+    templateForm.querySelector("[name='sku_separator']").value = "-";
+    templateForm.querySelector("[name='sku_version']").value = "1";
+    templateForm.querySelector("[name='freeze_existing_skus']").checked = true;
     await loadTemplates();
     await loadCatalog();
   } catch (error) {
@@ -1133,7 +1449,7 @@ itemTemplateSelect.addEventListener("change", async () => {
   }
   try {
     const template = await fetchTemplate(templateId);
-    renderAttributeFields(template.fields || []);
+    renderAttributeFields(template.attribute_specs || []);
   } catch (error) {
     showToast(error.message);
   }
@@ -1158,19 +1474,24 @@ itemForm.addEventListener("submit", async (event) => {
     }
 
     const payload = {
-      template_id: Number(templateId),
       uom: itemForm.querySelector("[name='uom']").value.trim(),
       track_lots: itemForm.querySelector("[name='track_lots']").checked,
       attributes,
     };
 
-    await apiRequest("/items", {
+    await apiRequest(`/templates/${Number(templateId)}/items`, {
       method: "POST",
       body: payload,
     });
 
-    setStatus(status, "Item created.", "success");
+    setStatus(status, "Item saved.", "success");
     itemForm.reset();
+    if (medicalTraceability) {
+      const trackLotsInput = itemForm.querySelector("[name='track_lots']");
+      if (trackLotsInput) {
+        trackLotsInput.checked = true;
+      }
+    }
     itemAttributesContainer.innerHTML = "<p class='muted'>Select a template to enter attributes.</p>";
     itemAttributesJson.value = "";
     await loadCatalog();
@@ -1197,7 +1518,7 @@ bindItemSearch(movementItemSearch, movementItemOptions, async (item) => {
     return;
   }
 
-  movementItemMeta.textContent = `${item.sku} - ${item.template_name}`;
+  movementItemMeta.textContent = `${item.product_code} - ${item.template_name}`;
   movementItemSearch.dataset.itemId = item.id;
   const trackLots = item.track_lots;
   movementLot.disabled = !trackLots;
@@ -1226,6 +1547,9 @@ movementForm.addEventListener("submit", async (event) => {
     if (!qty || qty <= 0) {
       throw new Error("Quantity must be greater than zero.");
     }
+    if (medicalTraceability && qty !== 1) {
+      throw new Error("Medical traceability requires quantity of 1.");
+    }
 
     const type = movementType.value;
     const signedQty = type === "outbound" ? -Math.abs(qty) : Math.abs(qty);
@@ -1248,6 +1572,9 @@ movementForm.addEventListener("submit", async (event) => {
         body: lotPayload,
       });
       lotId = lot.id;
+    }
+    if (medicalTraceability && !lotId) {
+      throw new Error("Select or create a lot for item-level traceability.");
     }
 
     const payload = {
@@ -1351,9 +1678,13 @@ orderLineForm.addEventListener("submit", async (event) => {
 
 function init() {
   setupPagers();
-  addTemplateFieldRow();
+  addTemplateSpecRow();
+  templateForm.querySelector("[name='sku_separator']").value = "-";
+  templateForm.querySelector("[name='sku_version']").value = "1";
+  templateForm.querySelector("[name='freeze_existing_skus']").checked = true;
   updateMovementReasons();
   resetMovementForm();
+  applyMedicalTraceabilityUI();
 
   safeLoad(loadManufacturers, "Manufacturers");
   safeLoad(loadTemplates, "Templates");

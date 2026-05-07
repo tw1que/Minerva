@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     initial_admin_password: str = Field(default="admin123", alias="INITIAL_ADMIN_PASSWORD")
 
     cors_origins: list[str] = Field(default_factory=list, alias="CORS_ORIGINS")
+    medical_traceability: bool = Field(default=False, alias="MEDICAL_TRACEABILITY")
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
@@ -47,6 +48,19 @@ class Settings(BaseSettings):
                 return json.loads(cleaned)
             return [item.strip() for item in cleaned.split(",") if item.strip()]
         return []
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def _parse_debug(cls, value: object) -> bool:
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned in {"1", "true", "yes", "on", "debug"}:
+                return True
+            if cleaned in {"release", "prod", "production"}:
+                return False
+            if cleaned in {"0", "false", "no", "off", ""}:
+                return False
+        return bool(value)
 
 
 settings = Settings()

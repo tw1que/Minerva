@@ -1,15 +1,28 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
 from app.api.pagination import normalize_pagination
-from app.db.models import ItemTemplate, Manufacturer, TemplateField, UserRole
+from app.db.models import Item, ItemTemplate, UserRole
+from app.schemas.item import ItemRead, ItemVariantCreate
 from app.schemas.pagination import Page
 from app.schemas.template import TemplateCreate, TemplateRead
+from app.services.attributes import AttributeValidationError, TemplateSpecError
+from app.services.items import (
+    ItemVariantConflictError,
+    MedicalTraceabilityError,
+    TemplateNotFoundError,
+    create_item_variant,
+)
+from app.services.sku import SKUGenerationError
+from app.services.templates import (
+    ManufacturerNotFoundError,
+    TemplateConflictError,
+    create_template as create_template_service,
+)
 
 router = APIRouter(prefix="/templates")
 
@@ -20,42 +33,12 @@ def create_template(
     db: Session = Depends(get_db),
     _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> ItemTemplate:
-    if payload.manufacturer_id is not None:
-        manufacturer = db.get(Manufacturer, payload.manufacturer_id)
-        if not manufacturer:
-            raise HTTPException(status_code=404, detail="Manufacturer not found.")
-
-    template = ItemTemplate(
-        name=payload.name,
-        manufacturer_id=payload.manufacturer_id,
-        sku_prefix=payload.sku_prefix,
-        sku_pattern=payload.sku_pattern,
-        seq_scope=payload.seq_scope,
-    )
-
-    for field in payload.fields:
-        template.fields.append(
-            TemplateField(
-                field_key=field.field_key,
-                field_type=field.field_type,
-                required=field.required,
-                include_in_sku=field.include_in_sku,
-                sku_order=field.sku_order,
-                default_value=field.default_value,
-                enum_values=field.enum_values,
-                format=field.format,
-            )
-        )
-
     try:
-        db.add(template)
-        db.commit()
-        db.refresh(template)
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Template already exists.") from exc
-
-    return template
+        return create_template_service(db, payload)
+    except ManufacturerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TemplateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/", response_model=Page[TemplateRead])
@@ -88,3 +71,37 @@ def get_template(
     if not template:
         raise HTTPException(status_code=404, detail="Template not found.")
     return template
+
+
+@router.post(
+    "/{template_id}/items",
+    response_model=ItemRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_template_item(
+    template_id: int,
+    payload: ItemVariantCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+) -> Item:
+    try:
+        item, created = create_item_variant(
+            db,
+            template_id,
+            payload.attributes,
+            uom=payload.uom,
+            track_lots=payload.track_lots,
+        )
+    except TemplateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (AttributeValidationError, TemplateSpecError, SKUGenerationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ItemVariantConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MedicalTraceabilityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return item

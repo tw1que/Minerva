@@ -27,11 +27,11 @@ def list_catalog_items(
         select(
             Item,
             ItemTemplate.name.label("template_name"),
-            ItemTemplate.manufacturer_id.label("manufacturer_id"),
+            Item.manufacturer_id.label("manufacturer_id"),
             Manufacturer.name.label("manufacturer_name"),
         )
-        .join(ItemTemplate, Item.template_id == ItemTemplate.id)
-        .outerjoin(Manufacturer, ItemTemplate.manufacturer_id == Manufacturer.id)
+        .outerjoin(ItemTemplate, Item.template_id == ItemTemplate.id)
+        .outerjoin(Manufacturer, Item.manufacturer_id == Manufacturer.id)
     )
 
     if search:
@@ -45,7 +45,7 @@ def list_catalog_items(
         )
 
     if manufacturer_id:
-        stmt = stmt.where(ItemTemplate.manufacturer_id == manufacturer_id)
+        stmt = stmt.where(Item.manufacturer_id == manufacturer_id)
 
     if attr_key and attr_val:
         stmt = stmt.where(Item.attributes[attr_key].astext.ilike(f"%{attr_val}%"))
@@ -63,9 +63,9 @@ def list_catalog_items(
         items.append(
             CatalogItemRead(
                 id=item.id,
-                sku=item.sku,
+                product_code=item.sku,
                 template_id=item.template_id,
-                template_name=template_name,
+                template_name=template_name or item.item_type or item.sku,
                 manufacturer_id=manufacturer_id_value,
                 manufacturer_name=manufacturer_name,
                 uom=item.uom,
