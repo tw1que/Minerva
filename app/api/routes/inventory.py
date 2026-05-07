@@ -49,7 +49,7 @@ def inventory_summary(
     stmt = (
         select(
             Item.id.label("item_id"),
-            Item.product_code,
+            Item.sku.label("product_code"),
             Item.uom,
             ItemTemplate.name.label("template_name"),
             Manufacturer.name.label("manufacturer_name"),
@@ -57,8 +57,8 @@ def inventory_summary(
             movement_subq.c.last_movement,
             reserved_subq.c.reserved,
         )
-        .join(ItemTemplate, Item.template_id == ItemTemplate.id)
-        .outerjoin(Manufacturer, ItemTemplate.manufacturer_id == Manufacturer.id)
+        .outerjoin(ItemTemplate, Item.template_id == ItemTemplate.id)
+        .outerjoin(Manufacturer, Item.manufacturer_id == Manufacturer.id)
         .outerjoin(movement_subq, movement_subq.c.item_id == Item.id)
         .outerjoin(reserved_subq, reserved_subq.c.item_id == Item.id)
     )
@@ -67,14 +67,14 @@ def inventory_summary(
         pattern = f"%{search}%"
         stmt = stmt.where(
             or_(
-                Item.product_code.ilike(pattern),
+                Item.sku.ilike(pattern),
                 ItemTemplate.name.ilike(pattern),
                 Manufacturer.name.ilike(pattern),
             )
         )
 
     if manufacturer_id:
-        stmt = stmt.where(ItemTemplate.manufacturer_id == manufacturer_id)
+        stmt = stmt.where(Item.manufacturer_id == manufacturer_id)
 
     if attr_key and attr_val:
         stmt = stmt.where(Item.attributes[attr_key].astext.ilike(f"%{attr_val}%"))
@@ -83,7 +83,7 @@ def inventory_summary(
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
 
     rows = (
-        db.execute(stmt.order_by(Item.product_code).offset(offset).limit(page_size)).all()
+        db.execute(stmt.order_by(Item.sku).offset(offset).limit(page_size)).all()
     )
 
     items: list[InventorySummaryRead] = []
@@ -94,7 +94,7 @@ def inventory_summary(
             InventorySummaryRead(
                 item_id=row.item_id,
                 product_code=row.product_code,
-                template_name=row.template_name,
+                template_name=row.template_name or row.product_code,
                 manufacturer_name=row.manufacturer_name,
                 uom=row.uom,
                 on_hand=on_hand,

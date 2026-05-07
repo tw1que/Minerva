@@ -12,8 +12,16 @@ from app.schemas.pagination import Page
 from app.services.attributes import AttributeValidationError, TemplateSpecError
 from app.services.items import (
     ItemVariantConflictError,
+    ItemBlankPayload,
+    ItemIvobaseCartridgePayload,
+    ItemTypeMismatchError,
+    MaterialClassNotFoundError,
+    ManufacturerNotFoundError,
     MedicalTraceabilityError,
+    ShadeNotFoundError,
     TemplateNotFoundError,
+    UnitOfMeasureNotFoundError,
+    create_relational_item,
     create_item_variant,
 )
 from app.services.sku import SKUGenerationError
@@ -29,18 +37,53 @@ def create_item(
     _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ) -> Item:
     try:
-        item, created = create_item_variant(
-            db,
-            payload.template_id,
-            payload.attributes,
-            uom=payload.uom,
-            track_lots=payload.track_lots,
-        )
+        if payload.sku or payload.item_type or payload.blank_details or payload.ivobase_cartridge_details:
+            item = create_relational_item(
+                db,
+                item_type=payload.item_type or "generic",
+                sku=payload.sku or "",
+                name=payload.name or payload.sku or "",
+                unit_id=payload.unit_id,
+                manufacturer_id=payload.manufacturer_id,
+                template_id=payload.template_id,
+                track_lots=payload.track_lots,
+                metadata=payload.metadata,
+                legacy_attributes=payload.attributes,
+                blank_details=(
+                    ItemBlankPayload(**payload.blank_details.model_dump())
+                    if payload.blank_details
+                    else None
+                ),
+                ivobase_cartridge_details=(
+                    ItemIvobaseCartridgePayload(**payload.ivobase_cartridge_details.model_dump())
+                    if payload.ivobase_cartridge_details
+                    else None
+                ),
+            )
+            created = True
+        else:
+            if payload.template_id is None or payload.uom is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="template_id and uom are required for legacy template-driven item creation.",
+                )
+            item, created = create_item_variant(
+                db,
+                payload.template_id,
+                payload.attributes,
+                uom=payload.uom,
+                track_lots=payload.track_lots,
+                manufacturer_id=payload.manufacturer_id,
+            )
     except TemplateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ManufacturerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (UnitOfMeasureNotFoundError, MaterialClassNotFoundError, ShadeNotFoundError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (AttributeValidationError, TemplateSpecError, SKUGenerationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ItemVariantConflictError as exc:
+    except (ItemVariantConflictError, ItemTypeMismatchError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except MedicalTraceabilityError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -75,7 +118,7 @@ def list_items(
     page, page_size, offset = normalize_pagination(page, page_size)
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
     items = (
-        db.execute(stmt.order_by(Item.product_code).offset(offset).limit(page_size))
+        db.execute(stmt.order_by(Item.sku).offset(offset).limit(page_size))
         .scalars()
         .all()
     )

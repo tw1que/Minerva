@@ -3,14 +3,17 @@
 FastAPI + Postgres inventory core with template-driven SKUs, lots, stock movements, and order allocations.
 Includes a minimal brutalist UI and Docker dev/prod setups.
 
+Architecture notes for the relational inventory refactor live in [docs/architecture.md](docs/architecture.md).
+
 ## Quick start (dev)
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-- UI: http://localhost:8000
+- Frontend (Vite dev): http://localhost:5173
 - API docs: http://localhost:8000/docs
+- Legacy UI (server-rendered): http://localhost:8000/legacy
 
 Dev mode auto-creates tables on startup (AUTO_CREATE_DB=true).
 
@@ -33,6 +36,8 @@ Run migrations once:
 docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 ```
 
+Production serves the built frontend from `http://localhost:8000`.
+
 ## Environment
 
 Copy `.env.example` to `.env` and adjust values if needed.
@@ -51,7 +56,7 @@ Key variables:
 
 ### Template specs + SKU rules
 
-Templates now define JSON-driven attribute specs and SKU rules.
+Templates now define JSON-driven attribute specs and SKU rules, but they are no longer the intended long-term source of truth for item facts. New relational item flows should prefer `items` + typed item tables, with templates used for SKU/display/form configuration.
 
 Example payload for `POST /templates`:
 
@@ -85,3 +90,4 @@ Key points:
 - `attribute_specs` validates and normalizes attributes (required, enum/range, normalize, sku_map).
 - `sku_rule` builds SKU from ordered tokens with the template prefix and separator.
 - No property prefixes are added; SKU becomes `BLK-98-20-A2-ML` (or `BLK-98-20-A2` if optional tokens are missing).
+- Stock remains an append-only ledger. Balances are derived from `stock_movements`, not stored as the source of truth.

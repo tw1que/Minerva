@@ -49,5 +49,18 @@ class Settings(BaseSettings):
             return [item.strip() for item in cleaned.split(",") if item.strip()]
         return []
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def _parse_debug(cls, value: object) -> bool:
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned in {"1", "true", "yes", "on", "debug"}:
+                return True
+            if cleaned in {"release", "prod", "production"}:
+                return False
+            if cleaned in {"0", "false", "no", "off", ""}:
+                return False
+        return bool(value)
+
 
 settings = Settings()

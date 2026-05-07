@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
@@ -11,7 +10,7 @@ from app.core.config import settings
 from app.db.models import Item, Lot, UserRole
 from app.schemas.lot import LotCreate, LotRead
 from app.schemas.pagination import Page
-from app.services.sku import SKUGenerationError, assign_instance_seq, build_instance_sku
+from app.services.inventory import LookupNotFoundError, create_lot_snapshot
 
 router = APIRouter(prefix="/lots")
 
@@ -34,28 +33,27 @@ def create_lot(
 
     try:
         with db.begin():
-            seq = assign_instance_seq(db, item)
-            instance_sku = build_instance_sku(item.product_code, seq)
-            lot = Lot(
-                item_id=payload.item_id,
-                lot_code=payload.lot_code,
-                seq=seq,
-                instance_sku=instance_sku,
+            lot = create_lot_snapshot(
+                db,
+                item=item,
+                manufacturer_id=payload.manufacturer_id,
+                material_class_id=payload.material_class_id,
+                shade_id=payload.shade_id,
+                manufacturer_lot_code=payload.manufacturer_lot_code or payload.lot_code,
                 supplier_name=payload.supplier_name,
                 manufacturing_date=payload.manufacturing_date,
                 expires_at=payload.expires_at,
                 certificate_ref=payload.certificate_ref,
                 notes=payload.notes,
             )
-            db.add(lot)
         db.refresh(lot)
-    except IntegrityError as exc:
+    except LookupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(
-            status_code=409,
-            detail="Lot already exists or violates constraints.",
+            status_code=400,
+            detail=str(exc),
         ) from exc
-    except SKUGenerationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return lot
 

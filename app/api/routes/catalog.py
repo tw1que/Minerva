@@ -27,25 +27,25 @@ def list_catalog_items(
         select(
             Item,
             ItemTemplate.name.label("template_name"),
-            ItemTemplate.manufacturer_id.label("manufacturer_id"),
+            Item.manufacturer_id.label("manufacturer_id"),
             Manufacturer.name.label("manufacturer_name"),
         )
-        .join(ItemTemplate, Item.template_id == ItemTemplate.id)
-        .outerjoin(Manufacturer, ItemTemplate.manufacturer_id == Manufacturer.id)
+        .outerjoin(ItemTemplate, Item.template_id == ItemTemplate.id)
+        .outerjoin(Manufacturer, Item.manufacturer_id == Manufacturer.id)
     )
 
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(
             or_(
-                Item.product_code.ilike(pattern),
+                Item.sku.ilike(pattern),
                 ItemTemplate.name.ilike(pattern),
                 Manufacturer.name.ilike(pattern),
             )
         )
 
     if manufacturer_id:
-        stmt = stmt.where(ItemTemplate.manufacturer_id == manufacturer_id)
+        stmt = stmt.where(Item.manufacturer_id == manufacturer_id)
 
     if attr_key and attr_val:
         stmt = stmt.where(Item.attributes[attr_key].astext.ilike(f"%{attr_val}%"))
@@ -54,7 +54,7 @@ def list_catalog_items(
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
 
     rows = (
-        db.execute(stmt.order_by(Item.product_code).offset(offset).limit(page_size))
+        db.execute(stmt.order_by(Item.sku).offset(offset).limit(page_size))
         .all()
     )
 
@@ -63,9 +63,9 @@ def list_catalog_items(
         items.append(
             CatalogItemRead(
                 id=item.id,
-                product_code=item.product_code,
+                product_code=item.sku,
                 template_id=item.template_id,
-                template_name=template_name,
+                template_name=template_name or item.item_type or item.sku,
                 manufacturer_id=manufacturer_id_value,
                 manufacturer_name=manufacturer_name,
                 uom=item.uom,

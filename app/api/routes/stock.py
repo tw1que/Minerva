@@ -4,7 +4,6 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
@@ -13,7 +12,14 @@ from app.core.config import settings
 from app.db.models import Item, ItemTemplate, Lot, StockMovement, StockReason, UserRole
 from app.schemas.movement import MovementCreate, MovementRead
 from app.schemas.pagination import Page
-from app.services.inventory import get_available_qty
+from app.services.inventory import (
+    AdjustStockCommand,
+    InsufficientStockError,
+    InventoryError,
+    LookupNotFoundError,
+    adjust_stock,
+    get_available_qty,
+)
 
 router = APIRouter(prefix="/movements")
 
@@ -27,11 +33,6 @@ def create_movement(
     item = db.get(Item, payload.item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
-
-    if payload.lot_id is not None:
-        lot = db.get(Lot, payload.lot_id)
-        if not lot or lot.item_id != item.id:
-            raise HTTPException(status_code=404, detail="Lot not found for item.")
 
     if payload.qty_delta == 0:
         raise HTTPException(status_code=400, detail="Quantity cannot be zero.")
@@ -53,45 +54,41 @@ def create_movement(
                 detail="Medical traceability requires items to track lots.",
             )
 
-    if payload.reason == StockReason.ADJUST and not payload.comment:
+    reason_code = payload.movement_reason_code or (payload.reason.name if payload.reason else "ADJUST")
+    if reason_code == StockReason.ADJUST.name and not payload.comment:
         raise HTTPException(status_code=400, detail="Adjustment requires a comment.")
 
-    if payload.qty_delta < 0:
-        available = get_available_qty(db, item.id)
-        if available + payload.qty_delta < 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Not enough available stock. Available: {available}",
-            )
-
-    movement = StockMovement(
-        item_id=payload.item_id,
-        lot_id=payload.lot_id,
-        qty_delta=payload.qty_delta,
-        uom=payload.uom,
-        reason=payload.reason,
-        ref_type=payload.ref_type,
-        ref_id=payload.ref_id,
-        comment=payload.comment,
-    )
-
     try:
-        db.add(movement)
-        db.commit()
-        db.refresh(movement)
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Invalid stock movement.") from exc
+        movement = adjust_stock(
+            db,
+            AdjustStockCommand(
+                item_id=payload.item_id,
+                lot_id=payload.lot_id,
+                quantity_delta=payload.qty_delta,
+                unit_id=payload.unit_id,
+                movement_reason_code=reason_code,
+                ref_type=payload.ref_type,
+                ref_id=payload.ref_id,
+                comment=payload.comment,
+            ),
+        )
+    except LookupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InsufficientStockError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except InventoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return MovementRead(
         id=movement.id,
         created_at=movement.created_at,
         item_id=item.id,
-        item_product_code=item.product_code,
-        template_name=item.template.name,
+        item_product_code=item.sku,
+        template_name=item.template.name if item.template else None,
         lot_id=movement.lot_id,
         qty_delta=movement.qty_delta,
-        uom=movement.uom,
+        unit_code_snapshot=movement.unit_code_snapshot,
+        movement_reason_code_snapshot=movement.movement_reason_code_snapshot,
         reason=movement.reason,
         comment=movement.comment,
     )
@@ -114,13 +111,13 @@ def list_movements(
             ItemTemplate.name.label("template_name"),
         )
         .join(Item, StockMovement.item_id == Item.id)
-        .join(ItemTemplate, Item.template_id == ItemTemplate.id)
+        .outerjoin(ItemTemplate, Item.template_id == ItemTemplate.id)
     )
 
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(
-            or_(Item.product_code.ilike(pattern), ItemTemplate.name.ilike(pattern))
+            or_(Item.sku.ilike(pattern), ItemTemplate.name.ilike(pattern))
         )
 
     if item_id:
@@ -130,7 +127,12 @@ def list_movements(
         stmt = stmt.where(StockMovement.lot_id == lot_id)
 
     if reason:
-        stmt = stmt.where(StockMovement.reason == reason)
+        stmt = stmt.where(
+            or_(
+                StockMovement.reason == reason,
+                StockMovement.movement_reason_code_snapshot == reason.name,
+            )
+        )
 
     page, page_size, offset = normalize_pagination(page, page_size)
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
@@ -151,7 +153,8 @@ def list_movements(
                 template_name=template_name,
                 lot_id=movement.lot_id,
                 qty_delta=movement.qty_delta,
-                uom=movement.uom,
+                unit_code_snapshot=movement.unit_code_snapshot,
+                movement_reason_code_snapshot=movement.movement_reason_code_snapshot,
                 reason=movement.reason,
                 comment=movement.comment,
             )

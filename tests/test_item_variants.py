@@ -58,7 +58,7 @@ def test_create_item_variant_idempotent(monkeypatch: pytest.MonkeyPatch) -> None
     )
 
     monkeypatch.setattr(items_service, "get_item_by_hash", lambda *_: existing)
-    monkeypatch.setattr(items_service, "get_item_by_product_code", lambda *_: None)
+    monkeypatch.setattr(items_service, "get_item_by_sku", lambda *_: None)
 
     item, created = create_item_variant(db, template.id, {"size": 5}, uom="EA")
     assert item is existing
@@ -79,7 +79,7 @@ def test_create_item_variant_product_code_conflict(monkeypatch: pytest.MonkeyPat
     )
 
     monkeypatch.setattr(items_service, "get_item_by_hash", lambda *_: None)
-    monkeypatch.setattr(items_service, "get_item_by_product_code", lambda *_: existing)
+    monkeypatch.setattr(items_service, "get_item_by_sku", lambda *_: existing)
 
     with pytest.raises(ItemVariantConflictError):
         create_item_variant(db, template.id, {"size": 5}, uom="EA")
@@ -88,11 +88,9 @@ def test_create_item_variant_product_code_conflict(monkeypatch: pytest.MonkeyPat
 def test_item_unique_constraints_present() -> None:
     constraints = {constraint.name: constraint for constraint in Item.__table__.constraints}
     assert "uq_item_variant" in constraints
-    assert "uq_item_product_code" in constraints
+    assert Item.__table__.c.sku.unique is True
     column_names = {col.name for col in constraints["uq_item_variant"].columns}
     assert column_names == {"template_id", "attribute_hash"}
-    product_code_names = {col.name for col in constraints["uq_item_product_code"].columns}
-    assert product_code_names == {"template_id", "product_code"}
 
 
 def test_create_item_variant_does_not_touch_counter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,9 +98,32 @@ def test_create_item_variant_does_not_touch_counter(monkeypatch: pytest.MonkeyPa
     db = FakeSession(template)
 
     monkeypatch.setattr(items_service, "get_item_by_hash", lambda *_: None)
-    monkeypatch.setattr(items_service, "get_item_by_product_code", lambda *_: None)
+    monkeypatch.setattr(items_service, "get_item_by_sku", lambda *_: None)
 
     item, created = create_item_variant(db, template.id, {"size": 5}, uom="EA")
     assert created is True
     assert item.product_code == "TMP-5"
     assert db.counter_touched is False
+
+
+def test_create_item_variant_expands_enum_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    template = ItemTemplate(
+        id=33,
+        name="Shade Template",
+        sku_prefix="SHD",
+        sku_pattern="{prefix}",
+        seq_scope=SKUSequenceScope.GLOBAL,
+        attribute_specs=[
+            {"key": "shade", "type": "enum", "required": True, "allowed_values": ["A1"]}
+        ],
+        sku_rule={"prefix": "SHD", "tokens": ["shade"]},
+    )
+    db = FakeSession(template)
+
+    monkeypatch.setattr(items_service, "get_item_by_hash", lambda *_: None)
+    monkeypatch.setattr(items_service, "get_item_by_sku", lambda *_: None)
+
+    item, created = create_item_variant(db, template.id, {"shade": "A2"}, uom="EA")
+    assert created is True
+    assert item.product_code == "SHD-A2"
+    assert template.attribute_specs[0]["allowed_values"] == ["A1", "A2"]

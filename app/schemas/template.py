@@ -41,6 +41,7 @@ class AttributeSpec(BaseModel):
     normalize: dict[str, Any] | list[str] | str | None = None
     sku_pad: int | dict[str, Any] | None = None
     sku_map: dict[str, str] | None = None
+    sku_token_prefix: str | None = None
     include_in_identity: bool = True
     include_in_sku: bool = True
 
@@ -67,9 +68,21 @@ class AttributeSpec(BaseModel):
     def validate_allowed(self) -> "AttributeSpec":
         if self.allowed_values is not None and self.allowed_range is not None:
             raise ValueError("Provide only allowed_values or allowed_range.")
-        if self.type == AttributeType.ENUM and not self.allowed_values:
-            raise ValueError("Enum attributes require allowed_values.")
+        if self.allowed_values == []:
+            self.allowed_values = None
         return self
+
+    @field_validator("sku_token_prefix")
+    @classmethod
+    def validate_token_prefix(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        if len(trimmed) > 4:
+            raise ValueError("sku_token_prefix must be 1-4 characters.")
+        return trimmed
 
 
 class SKURule(BaseModel):
@@ -97,7 +110,9 @@ class SKURule(BaseModel):
 
 class TemplateCreate(BaseModel):
     name: str
-    manufacturer_id: int | None = None
+    item_type: str | None = None
+    display_pattern: str | None = None
+    form_config: dict[str, Any] = Field(default_factory=dict)
     attribute_specs: list[AttributeSpec] = Field(default_factory=list)
     sku_rule: SKURule
 
@@ -115,7 +130,9 @@ class TemplateCreate(BaseModel):
 class TemplateRead(ORMBase):
     id: int
     name: str
-    manufacturer_id: int | None
+    item_type: str | None
+    display_pattern: str | None
+    form_config: dict[str, Any] = Field(default_factory=dict)
     attribute_specs: list[AttributeSpec] = Field(default_factory=list)
     sku_rule: SKURule
     active: bool

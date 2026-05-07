@@ -8,7 +8,7 @@ from app.api.routes import api_router
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine, wait_for_db
-from app.services.bootstrap import ensure_admin_user
+from app.services.bootstrap import ensure_admin_user, ensure_reference_data
 from app.web.routes import router as web_router
 
 
@@ -36,5 +36,9 @@ def on_startup() -> None:
         Base.metadata.create_all(bind=engine)
     try:
         ensure_admin_user()
+    except Exception:
+        pass
+    try:
+        ensure_reference_data()
     except Exception:
         pass

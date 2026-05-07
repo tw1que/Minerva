@@ -144,11 +144,11 @@ def get_order(
     lines_stmt = (
         select(
             OrderLine,
-            Item.product_code.label("item_product_code"),
+            Item.sku.label("item_product_code"),
             ItemTemplate.name.label("template_name"),
         )
         .join(Item, OrderLine.item_id == Item.id)
-        .join(ItemTemplate, Item.template_id == ItemTemplate.id)
+        .outerjoin(ItemTemplate, Item.template_id == ItemTemplate.id)
         .where(OrderLine.order_id == order_id)
     )
 
@@ -162,7 +162,7 @@ def get_order(
                 order_id=line.order_id,
                 item_id=line.item_id,
                 item_product_code=item_product_code,
-                template_name=template_name,
+                template_name=template_name or line.item.item_type or item_product_code,
                 qty_requested=line.qty_requested,
                 qty_allocated=line.qty_allocated,
                 uom=line.uom,
@@ -226,8 +226,8 @@ def add_order_line(
         id=line.id,
         order_id=line.order_id,
         item_id=line.item_id,
-        item_product_code=item.product_code,
-        template_name=item.template.name,
+        item_product_code=item.sku,
+        template_name=item.template.name if item.template else item.item_type or item.sku,
         qty_requested=line.qty_requested,
         qty_allocated=line.qty_allocated,
         uom=line.uom,
@@ -276,8 +276,8 @@ def allocate_order(
         id=line.id,
         order_id=line.order_id,
         item_id=line.item_id,
-        item_product_code=line.item.product_code,
-        template_name=line.item.template.name,
+        item_product_code=line.item.sku,
+        template_name=line.item.template.name if line.item.template else line.item.item_type or line.item.sku,
         qty_requested=line.qty_requested,
         qty_allocated=line.qty_allocated,
         uom=line.uom,
