@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -54,7 +52,9 @@ class FakeSession:
         self.objects = objects or {}
         self.added: list[object] = []
         self.committed = False
+        self.rolled_back = False
         self.refreshed: list[object] = []
+        self.begin_called = False
 
     def get(self, model, pk):
         return self.objects.get((model, pk))
@@ -69,7 +69,7 @@ class FakeSession:
         self.refreshed.append(obj)
 
     def rollback(self) -> None:
-        return None
+        self.rolled_back = True
 
     def flush(self) -> None:
         return None
@@ -80,9 +80,9 @@ class FakeSession:
     def in_transaction(self) -> bool:
         return True
 
-    @contextmanager
     def begin(self):
-        yield self
+        self.begin_called = True
+        raise AssertionError("inventory services should not call db.begin()")
 
 
 def test_lookup_models_have_expected_constraints() -> None:
@@ -123,6 +123,8 @@ def test_create_relational_item_with_blank_details(monkeypatch: pytest.MonkeyPat
     assert item.uom == "disc"
     assert item.blank_details is not None
     assert item.blank_details.material_class_id == 2
+    assert item.attributes == {}
+    assert item.attribute_hash is None
     assert db.committed is True
 
 
@@ -175,6 +177,8 @@ def test_receive_stock_creates_positive_stock_movement(monkeypatch: pytest.Monke
 
     assert created_lot is lot
     assert created_movement.qty_delta == Decimal("5")
+    assert db.committed is True
+    assert db.begin_called is False
 
 
 def test_consume_stock_creates_order_material_and_negative_movement(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,6 +217,8 @@ def test_consume_stock_creates_order_material_and_negative_movement(monkeypatch:
     assert order_material.qty_used == Decimal("2")
     assert order_material.item_sku_snapshot == "BLK-98-20-A2"
     assert order_material.shade_code_snapshot == "A2"
+    assert db.committed is True
+    assert db.begin_called is False
 
     lot.item_sku_snapshot = "CHANGED"
     assert order_material.item_sku_snapshot == "BLK-98-20-A2"
@@ -239,6 +245,25 @@ def test_get_stock_balance_rows_uses_sum_projection() -> None:
     balances = get_stock_balance_rows(db)
 
     assert balances == [(1, Decimal("5")), (2, Decimal("-1"))]
+
+
+def test_receive_stock_rolls_back_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = Item(id=10, sku="BLK-98-20-A2", name="Blank", item_type="blank")
+    db = FakeSession({(Item, 10): item})
+
+    monkeypatch.setattr(
+        inventory_service,
+        "create_lot_snapshot",
+        lambda *_, **__: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(RuntimeError):
+        receive_stock(
+            db,
+            ReceiveStockCommand(item_id=10, quantity=Decimal("5"), manufacturer_lot_code="LOT-42"),
+        )
+
+    assert db.rolled_back is True
 
 
 def test_movement_reason_allowed_sign_enforced() -> None:

@@ -17,21 +17,23 @@ depends_on = None
 
 
 def upgrade() -> None:
-    sku_sequence_scope = sa.Enum(
+    sku_sequence_scope = postgresql.ENUM(
         "GLOBAL",
         "PER_TEMPLATE",
         "PER_PREFIX",
         "PER_YEAR",
         name="sku_sequence_scope",
+        create_type=False,
     )
-    template_field_type = sa.Enum(
+    template_field_type = postgresql.ENUM(
         "TEXT",
         "INT",
         "DECIMAL",
         "ENUM",
         name="template_field_type",
+        create_type=False,
     )
-    stock_reason = sa.Enum(
+    stock_reason = postgresql.ENUM(
         "RECEIPT",
         "CONSUME",
         "ADJUST",
@@ -39,11 +41,32 @@ def upgrade() -> None:
         "SCRAP",
         "TRANSFER",
         name="stock_reason",
+        create_type=False,
     )
 
-    sku_sequence_scope.create(op.get_bind(), checkfirst=True)
-    template_field_type.create(op.get_bind(), checkfirst=True)
-    stock_reason.create(op.get_bind(), checkfirst=True)
+    postgresql.ENUM(
+        "GLOBAL",
+        "PER_TEMPLATE",
+        "PER_PREFIX",
+        "PER_YEAR",
+        name="sku_sequence_scope",
+    ).create(op.get_bind(), checkfirst=True)
+    postgresql.ENUM(
+        "TEXT",
+        "INT",
+        "DECIMAL",
+        "ENUM",
+        name="template_field_type",
+    ).create(op.get_bind(), checkfirst=True)
+    postgresql.ENUM(
+        "RECEIPT",
+        "CONSUME",
+        "ADJUST",
+        "RETURN",
+        "SCRAP",
+        "TRANSFER",
+        name="stock_reason",
+    ).create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "manufacturers",

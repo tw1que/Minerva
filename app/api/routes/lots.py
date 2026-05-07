@@ -32,24 +32,26 @@ def create_lot(
         )
 
     try:
-        with db.begin():
-            lot = create_lot_snapshot(
-                db,
-                item=item,
-                manufacturer_id=payload.manufacturer_id,
-                material_class_id=payload.material_class_id,
-                shade_id=payload.shade_id,
-                manufacturer_lot_code=payload.manufacturer_lot_code or payload.lot_code,
-                supplier_name=payload.supplier_name,
-                manufacturing_date=payload.manufacturing_date,
-                expires_at=payload.expires_at,
-                certificate_ref=payload.certificate_ref,
-                notes=payload.notes,
-            )
+        lot = create_lot_snapshot(
+            db,
+            item=item,
+            manufacturer_id=payload.manufacturer_id,
+            material_class_id=payload.material_class_id,
+            shade_id=payload.shade_id,
+            manufacturer_lot_code=payload.manufacturer_lot_code or payload.lot_code,
+            supplier_name=payload.supplier_name,
+            manufacturing_date=payload.manufacturing_date,
+            expires_at=payload.expires_at,
+            certificate_ref=payload.certificate_ref,
+            notes=payload.notes,
+        )
+        db.commit()
         db.refresh(lot)
     except LookupNotFoundError as exc:
+        db.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        db.rollback()
         raise HTTPException(
             status_code=400,
             detail=str(exc),

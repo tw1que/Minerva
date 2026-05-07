@@ -7,6 +7,7 @@ Create Date: 2026-01-08 13:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0002_auth_orders"
@@ -16,18 +17,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    user_role = sa.Enum("ADMIN", "OPERATOR", "VIEWER", name="user_role")
-    order_status = sa.Enum(
+    user_role = postgresql.ENUM("ADMIN", "OPERATOR", "VIEWER", name="user_role", create_type=False)
+    order_status = postgresql.ENUM(
         "DRAFT",
         "RESERVED",
         "ALLOCATED",
         "FULFILLED",
         "CANCELLED",
         name="order_status",
+        create_type=False,
     )
 
-    user_role.create(op.get_bind(), checkfirst=True)
-    order_status.create(op.get_bind(), checkfirst=True)
+    postgresql.ENUM("ADMIN", "OPERATOR", "VIEWER", name="user_role").create(op.get_bind(), checkfirst=True)
+    postgresql.ENUM(
+        "DRAFT",
+        "RESERVED",
+        "ALLOCATED",
+        "FULFILLED",
+        "CANCELLED",
+        name="order_status",
+    ).create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "users",

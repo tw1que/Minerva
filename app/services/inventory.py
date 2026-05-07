@@ -136,7 +136,9 @@ def get_stock_balance_rows(db: Session) -> list[tuple[int | None, Decimal]]:
         select(
             StockMovement.lot_id,
             func.coalesce(func.sum(StockMovement.qty_delta), 0).label("quantity_on_hand"),
-        ).group_by(StockMovement.lot_id)
+        )
+        .where(StockMovement.lot_id.is_not(None))
+        .group_by(StockMovement.lot_id)
     ).all()
     return [(lot_id, Decimal(str(quantity_on_hand))) for lot_id, quantity_on_hand in rows]
 
@@ -313,7 +315,7 @@ def receive_stock(db: Session, command: ReceiveStockCommand) -> tuple[Lot, Stock
 
     item = _get_item(db, command.item_id)
 
-    with db.begin():
+    try:
         lot = create_lot_snapshot(
             db,
             item=item,
@@ -340,6 +342,10 @@ def receive_stock(db: Session, command: ReceiveStockCommand) -> tuple[Lot, Stock
             created_by=command.created_by,
             comment=command.comment,
         )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     db.refresh(lot)
     db.refresh(movement)
@@ -359,7 +365,7 @@ def consume_stock(db: Session, command: ConsumeStockCommand) -> tuple[OrderMater
     if available < command.quantity:
         raise InsufficientStockError(f"Not enough stock in lot. Available: {available}")
 
-    with db.begin():
+    try:
         movement = _build_movement(
             db,
             item=item,
@@ -388,6 +394,10 @@ def consume_stock(db: Session, command: ConsumeStockCommand) -> tuple[OrderMater
             stock_movement_id=movement.id,
         )
         db.add(order_material)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     db.refresh(movement)
     db.refresh(order_material)
@@ -414,7 +424,7 @@ def adjust_stock(db: Session, command: AdjustStockCommand) -> StockMovement:
         if available + command.quantity_delta < 0:
             raise InsufficientStockError(f"Not enough available stock. Available: {available}")
 
-    with db.begin():
+    try:
         movement = _build_movement(
             db,
             item=item,
@@ -429,6 +439,10 @@ def adjust_stock(db: Session, command: AdjustStockCommand) -> StockMovement:
             created_by=command.created_by,
             comment=command.comment,
         )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     db.refresh(movement)
     return movement

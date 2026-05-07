@@ -47,6 +47,7 @@ Templates must not be treated as the authoritative storage layer for item attrib
 ```sql
 SELECT lot_id, SUM(qty_delta) AS quantity_on_hand
 FROM stock_movements
+WHERE lot_id IS NOT NULL
 GROUP BY lot_id;
 ```
 
