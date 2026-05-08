@@ -65,7 +65,7 @@ def create_manufacturer(
 ):
     return _create_lookup(
         db,
-        Manufacturer(code=payload.code.strip(), name=payload.name.strip()),
+        Manufacturer(code=payload.code, name=payload.name),
         "Manufacturer code already exists.",
     )
 
@@ -86,7 +86,7 @@ def create_shade_system(
 ):
     return _create_lookup(
         db,
-        ShadeSystem(code=payload.code.strip(), name=payload.name.strip()),
+        ShadeSystem(code=payload.code, name=payload.name),
         "Shade system code already exists.",
     )
 
@@ -105,12 +105,16 @@ def create_shade(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
+    shade_system = db.get(ShadeSystem, payload.shade_system_id)
+    if not shade_system:
+        raise HTTPException(status_code=404, detail="Shade system not found.")
+
     return _create_lookup(
         db,
         Shade(
             shade_system_id=payload.shade_system_id,
-            code=payload.code.strip(),
-            name=payload.name.strip(),
+            code=payload.code,
+            name=payload.name,
         ),
         "Shade code already exists for the selected shade system.",
     )
@@ -132,7 +136,7 @@ def create_material_class(
 ):
     return _create_lookup(
         db,
-        MaterialClass(code=payload.code.strip(), name=payload.name.strip()),
+        MaterialClass(code=payload.code, name=payload.name),
         "Material class code already exists.",
     )
 
@@ -153,7 +157,7 @@ def create_unit(
 ):
     return _create_lookup(
         db,
-        UnitOfMeasure(code=payload.code.strip(), name=payload.name.strip()),
+        UnitOfMeasure(code=payload.code, name=payload.name),
         "Unit of measure code already exists.",
     )
 
@@ -174,7 +178,7 @@ def create_stock_location(
 ):
     return _create_lookup(
         db,
-        StockLocation(code=payload.code.strip(), name=payload.name.strip()),
+        StockLocation(code=payload.code, name=payload.name),
         "Stock location code already exists.",
     )
 
@@ -196,8 +200,8 @@ def create_movement_reason(
     return _create_lookup(
         db,
         MovementReason(
-            code=payload.code.strip(),
-            name=payload.name.strip(),
+            code=payload.code,
+            name=payload.name,
             allowed_sign=payload.allowed_sign,
         ),
         "Movement reason code already exists.",

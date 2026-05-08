@@ -1,14 +1,31 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.db.models import MovementReasonSign
 from app.schemas.base import ORMBase
 
 
-class ManufacturerCreate(BaseModel):
-    code: str
-    name: str
+NonEmptyLookupText = Annotated[str, Field(min_length=1)]
+
+
+class LookupCreateBase(BaseModel):
+    code: NonEmptyLookupText
+    name: NonEmptyLookupText
+
+    @field_validator("code", "name")
+    @classmethod
+    def validate_lookup_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Value must not be empty.")
+        return normalized
+
+
+class ManufacturerCreate(LookupCreateBase):
+    pass
 
 
 class ManufacturerRead(ORMBase):
@@ -18,9 +35,8 @@ class ManufacturerRead(ORMBase):
     active: bool
 
 
-class ShadeSystemCreate(BaseModel):
-    code: str
-    name: str
+class ShadeSystemCreate(LookupCreateBase):
+    pass
 
 
 class ShadeSystemRead(ORMBase):
@@ -30,10 +46,8 @@ class ShadeSystemRead(ORMBase):
     active: bool
 
 
-class ShadeCreate(BaseModel):
+class ShadeCreate(LookupCreateBase):
     shade_system_id: int
-    code: str
-    name: str
 
 
 class ShadeRead(ORMBase):
@@ -44,9 +58,8 @@ class ShadeRead(ORMBase):
     active: bool
 
 
-class MaterialClassCreate(BaseModel):
-    code: str
-    name: str
+class MaterialClassCreate(LookupCreateBase):
+    pass
 
 
 class MaterialClassRead(ORMBase):
@@ -56,9 +69,8 @@ class MaterialClassRead(ORMBase):
     active: bool
 
 
-class UnitOfMeasureCreate(BaseModel):
-    code: str
-    name: str
+class UnitOfMeasureCreate(LookupCreateBase):
+    pass
 
 
 class UnitOfMeasureRead(ORMBase):
@@ -68,9 +80,8 @@ class UnitOfMeasureRead(ORMBase):
     active: bool
 
 
-class StockLocationCreate(BaseModel):
-    code: str
-    name: str
+class StockLocationCreate(LookupCreateBase):
+    pass
 
 
 class StockLocationRead(ORMBase):
@@ -80,9 +91,7 @@ class StockLocationRead(ORMBase):
     active: bool
 
 
-class MovementReasonCreate(BaseModel):
-    code: str
-    name: str
+class MovementReasonCreate(LookupCreateBase):
     allowed_sign: MovementReasonSign
 
 
