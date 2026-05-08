@@ -4,7 +4,7 @@ Minerva Core is a backend-only FastAPI + SQLAlchemy + Postgres inventory and tra
 
 `items -> typed item details -> lots -> stock_movements -> derived balances -> order_material traceability`
 
-There is no legacy template-driven item creation flow, no frontend runtime, and no mutable stock balance table.
+There is no frontend runtime or legacy UI. Balances are derived from `stock_movements`; there is no mutable balance source-of-truth table.
 
 ## Core Model
 
@@ -69,13 +69,11 @@ The schema source of truth is Alembic.
 
 ## Clean DB Reset
 
-This refactor replaces the old migration chain with one clean initial migration. Existing dev databases must be reset:
+For a clean local reset:
 
 - `docker compose -f docker-compose.dev.yml down -v`
 - `docker compose -f docker-compose.dev.yml up -d db`
 - `docker compose -f docker-compose.dev.yml run --rm api alembic upgrade head`
-
-No compatibility migration path is provided for old template or attribute schemas.
 
 ## Default Admin
 
@@ -83,3 +81,15 @@ No compatibility migration path is provided for old template or attribute schema
 - Password: `admin123`
 
 The startup bootstrap also seeds a minimal lookup set including `disc`, `ZIRCONIA`, `A2`, and movement reasons such as `RECEIPT`, `CONSUME`, and `ADJUST`.
+
+## Validation
+
+- Full backend validation:
+  - `docker compose -f docker-compose.dev.yml down -v`
+  - `docker compose -f docker-compose.dev.yml up -d db`
+  - `docker compose -f docker-compose.dev.yml run --rm api alembic upgrade head`
+  - `docker compose -f docker-compose.dev.yml run --rm api pytest -q`
+  - `docker compose -f docker-compose.dev.yml up -d api`
+  - `curl http://localhost:8000/api/health`
+- Manual API sanity flow:
+  - [docs/manual_api_sanity.md](docs/manual_api_sanity.md)
