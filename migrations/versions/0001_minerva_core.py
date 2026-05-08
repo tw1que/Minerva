@@ -20,9 +20,9 @@ depends_on = None
 
 
 movement_reason_sign = postgresql.ENUM(
-    "positive",
-    "negative",
-    "both",
+    "POSITIVE",
+    "NEGATIVE",
+    "BOTH",
     name="movement_reason_sign",
     create_type=False,
 )
