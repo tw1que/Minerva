@@ -5,10 +5,10 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db, require_roles
-from app.core.security import create_access_token, get_password_hash, verify_password
-from app.db.models import User, UserRole
-from app.schemas.auth import Token, UserCreate, UserRead
+from app.api.deps import get_current_user, get_db
+from app.core.security import create_access_token, verify_password
+from app.db.models import User
+from app.schemas.auth import Token, UserRead
 
 router = APIRouter(prefix="/auth")
 
@@ -31,33 +31,3 @@ def login(
 @router.get("/me", response_model=UserRead)
 def read_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
-
-
-@router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def create_user(
-    payload: UserCreate,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN)),
-) -> User:
-    existing = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Username already exists.")
-
-    user = User(
-        username=payload.username,
-        password_hash=get_password_hash(payload.password),
-        role=payload.role,
-        active=True,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-@router.get("/users", response_model=list[UserRead])
-def list_users(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN)),
-) -> list[User]:
-    return list(db.execute(select(User).order_by(User.username)).scalars().all())

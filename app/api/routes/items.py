@@ -1,125 +1,130 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_db, require_roles
-from app.api.pagination import normalize_pagination
-from app.db.models import Item, UserRole
-from app.schemas.item import ItemCreate, ItemRead
-from app.schemas.pagination import Page
-from app.services.attributes import AttributeValidationError, TemplateSpecError
+from app.db.models import Item, User, UserRole
+from app.schemas.item import BlankItemCreate, ItemCreate, ItemRead, IvobaseCartridgeItemCreate
 from app.services.items import (
-    ItemVariantConflictError,
-    ItemBlankPayload,
-    ItemIvobaseCartridgePayload,
-    ItemTypeMismatchError,
-    MaterialClassNotFoundError,
-    ManufacturerNotFoundError,
-    MedicalTraceabilityError,
-    ShadeNotFoundError,
-    TemplateNotFoundError,
-    UnitOfMeasureNotFoundError,
-    create_relational_item,
-    create_item_variant,
+    CreateBlankItemInput,
+    CreateItemInput,
+    CreateIvobaseCartridgeItemInput,
+    ItemValidationError,
+    create_blank_item,
+    create_item,
+    create_ivobase_cartridge_item,
 )
-from app.services.sku import SKUGenerationError
 
 router = APIRouter(prefix="/items")
 
 
-@router.post("/", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
-def create_item(
-    payload: ItemCreate,
-    response: Response,
+@router.get("", response_model=list[ItemRead])
+def list_items(
     db: Session = Depends(get_db),
-    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
-) -> Item:
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)),
+):
+    return list(
+        db.execute(
+            select(Item)
+            .options(selectinload(Item.blank_details), selectinload(Item.ivobase_cartridge_details))
+            .order_by(Item.id)
+        ).scalars()
+    )
+
+
+@router.post("", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
+def create_generic_item(
+    payload: ItemCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+):
     try:
-        if payload.sku or payload.item_type or payload.blank_details or payload.ivobase_cartridge_details:
-            item = create_relational_item(
-                db,
-                item_type=payload.item_type or "generic",
-                sku=payload.sku or "",
-                name=payload.name or payload.sku or "",
+        item = create_item(
+            db,
+            CreateItemInput(
+                sku=payload.sku,
+                name=payload.name,
+                item_type=payload.item_type,
                 unit_id=payload.unit_id,
                 manufacturer_id=payload.manufacturer_id,
-                template_id=payload.template_id,
-                track_lots=payload.track_lots,
-                metadata=payload.metadata,
-                legacy_attributes=payload.attributes,
-                blank_details=(
-                    ItemBlankPayload(**payload.blank_details.model_dump())
-                    if payload.blank_details
-                    else None
-                ),
-                ivobase_cartridge_details=(
-                    ItemIvobaseCartridgePayload(**payload.ivobase_cartridge_details.model_dump())
-                    if payload.ivobase_cartridge_details
-                    else None
-                ),
-            )
-            created = True
-        else:
-            if payload.template_id is None or payload.uom is None:
-                raise HTTPException(
-                    status_code=422,
-                    detail="template_id and uom are required for legacy template-driven item creation.",
-                )
-            item, created = create_item_variant(
-                db,
-                payload.template_id,
-                payload.attributes,
-                uom=payload.uom,
-                track_lots=payload.track_lots,
-                manufacturer_id=payload.manufacturer_id,
-            )
-    except TemplateNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ManufacturerNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (UnitOfMeasureNotFoundError, MaterialClassNotFoundError, ShadeNotFoundError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (AttributeValidationError, TemplateSpecError, SKUGenerationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except (ItemVariantConflictError, ItemTypeMismatchError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except MedicalTraceabilityError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    if not created:
-        response.status_code = status.HTTP_200_OK
-    return item
+                metadata_json=payload.metadata_json,
+            ),
+        )
+        db.commit()
+        db.refresh(item)
+        return item
+    except ItemValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{item_id}", response_model=ItemRead)
 def get_item(
     item_id: int,
     db: Session = Depends(get_db),
-) -> Item:
-    item = db.get(Item, item_id)
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)),
+):
+    item = db.execute(
+        select(Item)
+        .options(selectinload(Item.blank_details), selectinload(Item.ivobase_cartridge_details))
+        .where(Item.id == item_id)
+    ).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found.")
     return item
 
 
-@router.get("/", response_model=Page[ItemRead])
-def list_items(
-    template_id: int | None = None,
-    page: int = 1,
-    page_size: int = 50,
+@router.post("/blanks", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
+def create_blank(
+    payload: BlankItemCreate,
     db: Session = Depends(get_db),
-) -> dict:
-    stmt = select(Item)
-    if template_id:
-        stmt = stmt.where(Item.template_id == template_id)
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+):
+    try:
+        return create_blank_item(
+            db,
+            CreateBlankItemInput(
+                sku=payload.sku,
+                name=payload.name,
+                item_type=payload.item_type,
+                unit_id=payload.unit_id,
+                manufacturer_id=payload.manufacturer_id,
+                metadata_json=payload.metadata_json,
+                diameter_mm=payload.diameter_mm,
+                thickness_mm=payload.thickness_mm,
+                material_class_id=payload.material_class_id,
+                shade_id=payload.shade_id,
+                is_multilayer=payload.is_multilayer,
+            ),
+        )
+    except ItemValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    page, page_size, offset = normalize_pagination(page, page_size)
-    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-    items = (
-        db.execute(stmt.order_by(Item.sku).offset(offset).limit(page_size))
-        .scalars()
-        .all()
-    )
-    return {"items": list(items), "page": page, "page_size": page_size, "total": total}
+
+@router.post("/ivobase-cartridges", response_model=ItemRead, status_code=status.HTTP_201_CREATED)
+def create_ivobase_cartridge(
+    payload: IvobaseCartridgeItemCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+):
+    try:
+        return create_ivobase_cartridge_item(
+            db,
+            CreateIvobaseCartridgeItemInput(
+                sku=payload.sku,
+                name=payload.name,
+                item_type=payload.item_type,
+                unit_id=payload.unit_id,
+                manufacturer_id=payload.manufacturer_id,
+                metadata_json=payload.metadata_json,
+                material_class_id=payload.material_class_id,
+                shade_id=payload.shade_id,
+                size_code=payload.size_code,
+            ),
+        )
+    except ItemValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

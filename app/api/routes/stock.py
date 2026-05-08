@@ -1,163 +1,151 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_roles
-from app.api.pagination import normalize_pagination
-from app.core.config import settings
-from app.db.models import Item, ItemTemplate, Lot, StockMovement, StockReason, UserRole
-from app.schemas.movement import MovementCreate, MovementRead
-from app.schemas.pagination import Page
+from app.db.models import StockMovement, User, UserRole
+from app.schemas.stock import (
+    AdjustStockRequest,
+    ConsumeStockRequest,
+    ReceiveStockRequest,
+    StockBalanceRead,
+    StockMovementRead,
+)
 from app.services.inventory import (
-    AdjustStockCommand,
+    AdjustStockInput,
+    ConsumeStockInput,
     InsufficientStockError,
-    InventoryError,
-    LookupNotFoundError,
+    InventoryValidationError,
+    ReceiveStockInput,
     adjust_stock,
-    get_available_qty,
+    consume_stock,
+    list_item_balances,
+    list_lot_balances,
+    receive_stock,
 )
 
-router = APIRouter(prefix="/movements")
+router = APIRouter(prefix="/stock")
 
 
-@router.post("/", response_model=MovementRead, status_code=status.HTTP_201_CREATED)
-def create_movement(
-    payload: MovementCreate,
+@router.post("/receive", response_model=StockMovementRead, status_code=status.HTTP_201_CREATED)
+def receive_stock_route(
+    payload: ReceiveStockRequest,
     db: Session = Depends(get_db),
-    _: UserRole = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
-) -> MovementRead:
-    item = db.get(Item, payload.item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found.")
-
-    if payload.qty_delta == 0:
-        raise HTTPException(status_code=400, detail="Quantity cannot be zero.")
-
-    if settings.medical_traceability:
-        if payload.lot_id is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Medical traceability requires a lot for each movement.",
-            )
-        if abs(payload.qty_delta) != Decimal("1"):
-            raise HTTPException(
-                status_code=400,
-                detail="Medical traceability requires movement quantity of 1 per item.",
-            )
-        if not item.track_lots:
-            raise HTTPException(
-                status_code=400,
-                detail="Medical traceability requires items to track lots.",
-            )
-
-    reason_code = payload.movement_reason_code or (payload.reason.name if payload.reason else "ADJUST")
-    if reason_code == StockReason.ADJUST.name and not payload.comment:
-        raise HTTPException(status_code=400, detail="Adjustment requires a comment.")
-
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+):
     try:
-        movement = adjust_stock(
+        _, movement = receive_stock(
             db,
-            AdjustStockCommand(
+            ReceiveStockInput(
                 item_id=payload.item_id,
-                lot_id=payload.lot_id,
-                quantity_delta=payload.qty_delta,
-                unit_id=payload.unit_id,
-                movement_reason_code=reason_code,
+                quantity=payload.quantity,
+                movement_reason_id=payload.movement_reason_id,
+                manufacturer_lot_code=payload.manufacturer_lot_code,
+                manufacturer_id=payload.manufacturer_id,
+                material_class_id=payload.material_class_id,
+                shade_id=payload.shade_id,
+                lot_code=payload.lot_code,
+                to_location_id=payload.to_location_id,
+                expires_at=payload.expires_at,
+                certificate_ref=payload.certificate_ref,
+                notes=payload.notes,
                 ref_type=payload.ref_type,
                 ref_id=payload.ref_id,
+                moved_by=payload.moved_by,
+                created_by=payload.created_by,
                 comment=payload.comment,
             ),
         )
-    except LookupNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except InsufficientStockError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except InventoryError as exc:
+        return movement
+    except InventoryValidationError as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return MovementRead(
-        id=movement.id,
-        created_at=movement.created_at,
-        item_id=item.id,
-        item_product_code=item.sku,
-        template_name=item.template.name if item.template else None,
-        lot_id=movement.lot_id,
-        qty_delta=movement.qty_delta,
-        unit_code_snapshot=movement.unit_code_snapshot,
-        movement_reason_code_snapshot=movement.movement_reason_code_snapshot,
-        reason=movement.reason,
-        comment=movement.comment,
-    )
 
-
-@router.get("/", response_model=Page[MovementRead])
-def list_movements(
-    search: str | None = None,
-    item_id: int | None = None,
-    lot_id: int | None = None,
-    reason: StockReason | None = None,
-    page: int = 1,
-    page_size: int = 50,
+@router.post("/adjust", response_model=StockMovementRead, status_code=status.HTTP_201_CREATED)
+def adjust_stock_route(
+    payload: AdjustStockRequest,
     db: Session = Depends(get_db),
-) -> dict:
-    stmt = (
-        select(
-            StockMovement,
-            Item.product_code.label("item_product_code"),
-            ItemTemplate.name.label("template_name"),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+):
+    try:
+        return adjust_stock(
+            db,
+            AdjustStockInput(
+                item_id=payload.item_id,
+                qty_delta=payload.qty_delta,
+                movement_reason_id=payload.movement_reason_id,
+                comment=payload.comment,
+                lot_id=payload.lot_id,
+                from_location_id=payload.from_location_id,
+                to_location_id=payload.to_location_id,
+                ref_type=payload.ref_type,
+                ref_id=payload.ref_id,
+                moved_by=payload.moved_by,
+                created_by=payload.created_by,
+            ),
         )
-        .join(Item, StockMovement.item_id == Item.id)
-        .outerjoin(ItemTemplate, Item.template_id == ItemTemplate.id)
-    )
+    except InsufficientStockError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except InventoryValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if search:
-        pattern = f"%{search}%"
-        stmt = stmt.where(
-            or_(Item.sku.ilike(pattern), ItemTemplate.name.ilike(pattern))
+
+@router.post("/consume", response_model=StockMovementRead, status_code=status.HTTP_201_CREATED)
+def consume_stock_route(
+    payload: ConsumeStockRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
+):
+    try:
+        movement, _ = consume_stock(
+            db,
+            ConsumeStockInput(
+                order_id=payload.order_id,
+                item_id=payload.item_id,
+                lot_id=payload.lot_id,
+                quantity=payload.quantity,
+                movement_reason_id=payload.movement_reason_id,
+                used_by=payload.used_by,
+                created_by=payload.created_by,
+                comment=payload.comment,
+                from_location_id=payload.from_location_id,
+                ref_type=payload.ref_type,
+                ref_id=payload.ref_id,
+            ),
         )
+        return movement
+    except InsufficientStockError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except InventoryValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if item_id:
-        stmt = stmt.where(StockMovement.item_id == item_id)
 
-    if lot_id:
-        stmt = stmt.where(StockMovement.lot_id == lot_id)
+@router.get("/movements", response_model=list[StockMovementRead])
+def list_movements(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)),
+):
+    return list(db.execute(select(StockMovement).order_by(StockMovement.id)).scalars())
 
-    if reason:
-        stmt = stmt.where(
-            or_(
-                StockMovement.reason == reason,
-                StockMovement.movement_reason_code_snapshot == reason.name,
-            )
-        )
 
-    page, page_size, offset = normalize_pagination(page, page_size)
-    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+@router.get("/balances/lots", response_model=list[StockBalanceRead])
+def get_lot_balances(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)),
+):
+    return [StockBalanceRead(key_id=lot_id, qty_on_hand=qty) for lot_id, qty in list_lot_balances(db)]
 
-    rows = (
-        db.execute(stmt.order_by(StockMovement.created_at.desc()).offset(offset).limit(page_size))
-        .all()
-    )
 
-    items: list[MovementRead] = []
-    for movement, item_product_code, template_name in rows:
-        items.append(
-            MovementRead(
-                id=movement.id,
-                created_at=movement.created_at,
-                item_id=movement.item_id,
-                item_product_code=item_product_code,
-                template_name=template_name,
-                lot_id=movement.lot_id,
-                qty_delta=movement.qty_delta,
-                unit_code_snapshot=movement.unit_code_snapshot,
-                movement_reason_code_snapshot=movement.movement_reason_code_snapshot,
-                reason=movement.reason,
-                comment=movement.comment,
-            )
-        )
-
-    return {"items": items, "page": page, "page_size": page_size, "total": total}
+@router.get("/balances/items", response_model=list[StockBalanceRead])
+def get_item_balances(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)),
+):
+    return [StockBalanceRead(key_id=item_id, qty_on_hand=qty) for item_id, qty in list_item_balances(db)]

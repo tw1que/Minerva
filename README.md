@@ -1,93 +1,85 @@
-# Minerva Inventory Forge
+# Minerva Core
 
-FastAPI + Postgres inventory core with template-driven SKUs, lots, stock movements, and order allocations.
-Includes a minimal brutalist UI and Docker dev/prod setups.
+Minerva Core is a backend-only FastAPI + SQLAlchemy + Postgres inventory and traceability service. The codebase is intentionally stripped back to a small relational core:
 
-Architecture notes for the relational inventory refactor live in [docs/architecture.md](docs/architecture.md).
+`items -> typed item details -> lots -> stock_movements -> derived balances -> order_material traceability`
 
-## Quick start (dev)
+There is no legacy template-driven item creation flow, no frontend runtime, and no mutable stock balance table.
 
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
+## Core Model
 
-- Frontend (Vite dev): http://localhost:5173
-- API docs: http://localhost:8000/docs
-- Legacy UI (server-rendered): http://localhost:8000/legacy
+- `items` holds shared item identity and unit/manufacturer links.
+- `item_blanks` and `item_ivobase_cartridges` hold typed relational item facts.
+- `lots` snapshot item/manufacturer/material/shade values at receipt time.
+- `stock_movements` is append-only and is the only stock source of truth.
+- `order_materials` snapshots consumption traceability and links to the consuming stock movement.
 
-Dev mode auto-creates tables on startup (AUTO_CREATE_DB=true).
+## API
 
-## Default login (dev)
+- Docs: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- Health: `GET /api/health`
+- Auth:
+  - `POST /api/auth/login`
+  - `GET /api/auth/me`
+- Lookups:
+  - `GET/POST /api/lookups/manufacturers`
+  - `GET/POST /api/lookups/shade-systems`
+  - `GET/POST /api/lookups/shades`
+  - `GET/POST /api/lookups/material-classes`
+  - `GET/POST /api/lookups/units`
+  - `GET/POST /api/lookups/stock-locations`
+  - `GET/POST /api/lookups/movement-reasons`
+- Items:
+  - `GET /api/items`
+  - `POST /api/items`
+  - `GET /api/items/{item_id}`
+  - `POST /api/items/blanks`
+  - `POST /api/items/ivobase-cartridges`
+- Lots:
+  - `GET /api/lots`
+  - `GET /api/lots/{lot_id}`
+- Stock:
+  - `POST /api/stock/receive`
+  - `POST /api/stock/adjust`
+  - `POST /api/stock/consume`
+  - `GET /api/stock/movements`
+  - `GET /api/stock/balances/lots`
+  - `GET /api/stock/balances/items`
+- Orders:
+  - `GET /api/orders`
+  - `POST /api/orders`
+  - `GET /api/orders/{order_id}`
+  - `GET /api/order-materials`
 
-- Username: admin
-- Password: admin123
+## Dev Workflow
 
-Change these via `INITIAL_ADMIN_USERNAME` and `INITIAL_ADMIN_PASSWORD`.
+The schema source of truth is Alembic.
 
-## Production
+1. Start Postgres:
+   - `docker compose -f docker-compose.dev.yml up -d db`
+2. Apply schema:
+   - `docker compose -f docker-compose.dev.yml run --rm api alembic upgrade head`
+3. Run tests:
+   - `docker compose -f docker-compose.dev.yml run --rm api pytest -q`
+4. Start API:
+   - `docker compose -f docker-compose.dev.yml up -d api`
 
-```bash
-docker compose -f docker-compose.prod.yml up --build -d
-```
+`AUTO_CREATE_DB=false` by default. If you turn it on for throwaway experiments, that is explicitly a non-standard dev shortcut and not the supported schema path.
 
-Run migrations once:
+## Clean DB Reset
 
-```bash
-docker compose -f docker-compose.prod.yml exec api alembic upgrade head
-```
+This refactor replaces the old migration chain with one clean initial migration. Existing dev databases must be reset:
 
-Production serves the built frontend from `http://localhost:8000`.
+- `docker compose -f docker-compose.dev.yml down -v`
+- `docker compose -f docker-compose.dev.yml up -d db`
+- `docker compose -f docker-compose.dev.yml run --rm api alembic upgrade head`
 
-## Environment
+No compatibility migration path is provided for old template or attribute schemas.
 
-Copy `.env.example` to `.env` and adjust values if needed.
+## Default Admin
 
-Key variables:
-- `DATABASE_URL`
-- `APP_ENV` (dev|prod)
-- `AUTO_CREATE_DB` (true in dev)
-- `DB_CONNECT_RETRIES` and `DB_CONNECT_DELAY` (startup DB wait)
-- `SECRET_KEY`, `JWT_ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`
-- `INITIAL_ADMIN_USERNAME`, `INITIAL_ADMIN_PASSWORD`
-- `CORS_ORIGINS` as JSON list string
-- `MEDICAL_TRACEABILITY` (true to enforce item-level lot movements)
+- Username: `admin`
+- Password: `admin123`
 
-## Notes
-
-### Template specs + SKU rules
-
-Templates now define JSON-driven attribute specs and SKU rules, but they are no longer the intended long-term source of truth for item facts. New relational item flows should prefer `items` + typed item tables, with templates used for SKU/display/form configuration.
-
-Example payload for `POST /templates`:
-
-```json
-{
-  "name": "Blanks voor freesmachine",
-  "attribute_specs": [
-    {"key": "diameter", "type": "int", "required": true, "allowed_values": [95, 98]},
-    {"key": "thickness", "type": "int", "required": true, "allowed_range": {"min": 10, "max": 30, "step": 1}},
-    {"key": "color", "type": "enum", "required": true, "allowed_values": ["A1", "A2", "A3", "B1", "BL"]},
-    {
-      "key": "type",
-      "type": "enum",
-      "required": true,
-      "allowed_values": ["mono", "multilayer"],
-      "normalize": {"lower": true},
-      "sku_map": {"mono": "MO", "multilayer": "ML"}
-    }
-  ],
-  "sku_rule": {
-    "prefix": "BLK",
-    "separator": "-",
-    "tokens": ["diameter", "thickness", "color", "type"],
-    "version": 1,
-    "freeze_existing_skus": true
-  }
-}
-```
-
-Key points:
-- `attribute_specs` validates and normalizes attributes (required, enum/range, normalize, sku_map).
-- `sku_rule` builds SKU from ordered tokens with the template prefix and separator.
-- No property prefixes are added; SKU becomes `BLK-98-20-A2-ML` (or `BLK-98-20-A2` if optional tokens are missing).
-- Stock remains an append-only ledger. Balances are derived from `stock_movements`, not stored as the source of truth.
+The startup bootstrap also seeds a minimal lookup set including `disc`, `ZIRCONIA`, `A2`, and movement reasons such as `RECEIPT`, `CONSUME`, and `ADJUST`.

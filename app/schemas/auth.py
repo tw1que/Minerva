@@ -13,12 +13,6 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
-class UserCreate(BaseModel):
-    username: str
-    password: str
-    role: UserRole = UserRole.OPERATOR
-
-
 class UserRead(ORMBase):
     id: int
     username: str
