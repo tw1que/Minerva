@@ -14,6 +14,9 @@ from app.db.models import (
     Manufacturer,
     MaterialClass,
     MovementReason,
+    Order,
+    OrderMaterial,
+    OrderStatus,
     Shade,
     ShadeSystem,
     StockLocation,
@@ -22,9 +25,12 @@ from app.db.models import (
 )
 from app.services.inventory import (
     AdjustStockInput,
+    ConsumeStockInput,
+    InsufficientStockError,
     InventoryValidationError,
     ReceiveStockInput,
     adjust_stock,
+    consume_stock,
     list_item_balances,
     list_lot_balances,
     receive_stock,
@@ -264,5 +270,120 @@ def test_movement_reason_rejects_wrong_direction(bootstrapped_db: Session) -> No
                 quantity=Decimal("1.000"),
                 movement_reason_id=wrong_reason.id,
                 manufacturer_lot_code="BAD-LOT-001",
+            ),
+        )
+
+
+def test_consume_stock_creates_traceable_order_material_and_reduces_balance(bootstrapped_db: Session) -> None:
+    unit = _lookup_by_code(bootstrapped_db, UnitOfMeasure, "disc")
+    manufacturer = _lookup_by_code(bootstrapped_db, Manufacturer, "GENERIC")
+    material_class = _lookup_by_code(bootstrapped_db, MaterialClass, "ZIRCONIA")
+    shade = _lookup_by_code(bootstrapped_db, Shade, "A1")
+    receipt_reason = _lookup_by_code(bootstrapped_db, MovementReason, "RECEIPT")
+    consume_reason = _lookup_by_code(bootstrapped_db, MovementReason, "CONSUME")
+    item = create_blank_item(
+        bootstrapped_db,
+        CreateBlankItemInput(
+            sku="CONS-001",
+            name="Consumable Blank",
+            item_type="blank",
+            unit_id=unit.id,
+            manufacturer_id=manufacturer.id,
+            diameter_mm=Decimal("98.500"),
+            thickness_mm=Decimal("14.000"),
+            material_class_id=material_class.id,
+            shade_id=shade.id,
+        ),
+    )
+    order = Order(order_number="ORD-001", status=OrderStatus.OPEN)
+    bootstrapped_db.add(order)
+    bootstrapped_db.commit()
+    bootstrapped_db.refresh(order)
+
+    lot, _ = receive_stock(
+        bootstrapped_db,
+        ReceiveStockInput(
+            item_id=item.id,
+            quantity=Decimal("5.000"),
+            movement_reason_id=receipt_reason.id,
+            manufacturer_lot_code="MLOT-CONS-001",
+            manufacturer_id=manufacturer.id,
+            material_class_id=material_class.id,
+            shade_id=shade.id,
+            lot_code="LOT-CONS-001",
+        ),
+    )
+
+    movement, order_material = consume_stock(
+        bootstrapped_db,
+        ConsumeStockInput(
+            order_id=order.id,
+            item_id=item.id,
+            lot_id=lot.id,
+            quantity=Decimal("2.000"),
+            movement_reason_id=consume_reason.id,
+            used_by="tech-1",
+        ),
+    )
+
+    stored_movement = bootstrapped_db.get(StockMovement, movement.id)
+    stored_order_material = bootstrapped_db.get(OrderMaterial, order_material.id)
+    lot_balances = dict(list_lot_balances(bootstrapped_db))
+    item_balances = dict(list_item_balances(bootstrapped_db))
+
+    assert stored_movement is not None
+    assert stored_order_material is not None
+    assert stored_movement.qty_delta == Decimal("-2.000")
+    assert stored_order_material.stock_movement_id == stored_movement.id
+    assert stored_order_material.order_id == order.id
+    assert stored_order_material.item_id == item.id
+    assert stored_order_material.lot_id == lot.id
+    assert stored_order_material.unit_code_snapshot == "disc"
+    assert stored_order_material.item_sku_snapshot == "CONS-001"
+    assert stored_order_material.item_name_snapshot == "Consumable Blank"
+    assert stored_order_material.lot_code_snapshot == "LOT-CONS-001"
+    assert stored_order_material.material_class_code_snapshot == "ZIRCONIA"
+    assert stored_order_material.shade_code_snapshot == "A1"
+    assert lot_balances[lot.id] == Decimal("3.000")
+    assert item_balances[item.id] == Decimal("3.000")
+
+
+def test_consume_stock_rejects_overconsumption(bootstrapped_db: Session) -> None:
+    unit = _lookup_by_code(bootstrapped_db, UnitOfMeasure, "pcs")
+    receipt_reason = _lookup_by_code(bootstrapped_db, MovementReason, "RECEIPT")
+    consume_reason = _lookup_by_code(bootstrapped_db, MovementReason, "CONSUME")
+    item = create_item(
+        bootstrapped_db,
+        CreateItemInput(
+            sku="CONS-OVER-001",
+            name="Overconsume Item",
+            item_type="generic",
+            unit_id=unit.id,
+        ),
+    )
+    order = Order(order_number="ORD-OVER-001", status=OrderStatus.OPEN)
+    bootstrapped_db.add(order)
+    bootstrapped_db.commit()
+    bootstrapped_db.refresh(order)
+
+    lot, _ = receive_stock(
+        bootstrapped_db,
+        ReceiveStockInput(
+            item_id=item.id,
+            quantity=Decimal("1.000"),
+            movement_reason_id=receipt_reason.id,
+            manufacturer_lot_code="OVER-LOT-001",
+        ),
+    )
+
+    with pytest.raises(InsufficientStockError, match="Cannot consume more than current lot balance"):
+        consume_stock(
+            bootstrapped_db,
+            ConsumeStockInput(
+                order_id=order.id,
+                item_id=item.id,
+                lot_id=lot.id,
+                quantity=Decimal("2.000"),
+                movement_reason_id=consume_reason.id,
             ),
         )
