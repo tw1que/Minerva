@@ -41,7 +41,7 @@ def create_generic_item(
     _: User = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR)),
 ):
     try:
-        item = create_item(
+        return create_item(
             db,
             CreateItemInput(
                 sku=payload.sku,
@@ -52,9 +52,6 @@ def create_generic_item(
                 metadata_json=payload.metadata_json,
             ),
         )
-        db.commit()
-        db.refresh(item)
-        return item
     except ItemValidationError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc

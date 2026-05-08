@@ -41,7 +41,7 @@ class CreateIvobaseCartridgeItemInput(CreateItemInput):
     size_code: str = ""
 
 
-def create_item(db: Session, payload: CreateItemInput) -> Item:
+def _build_item(db: Session, payload: CreateItemInput) -> Item:
     if not payload.sku.strip() or not payload.name.strip() or not payload.item_type.strip():
         raise ItemValidationError("sku, name, item_type, and unit_id are required.")
     if db.execute(select(Item).where(Item.sku == payload.sku)).scalar_one_or_none():
@@ -67,51 +67,70 @@ def create_item(db: Session, payload: CreateItemInput) -> Item:
     return item
 
 
-def create_blank_item(db: Session, payload: CreateBlankItemInput) -> Item:
-    if payload.item_type.strip().lower() != "blank":
-        raise ItemValidationError("Blank items must use item_type='blank'.")
-    if payload.diameter_mm <= 0 or payload.thickness_mm <= 0:
-        raise ItemValidationError("Blank dimensions must be positive.")
-    if not db.get(MaterialClass, payload.material_class_id):
-        raise ItemValidationError("Material class not found.")
-    if payload.shade_id is not None and not db.get(Shade, payload.shade_id):
-        raise ItemValidationError("Shade not found.")
+def create_item(db: Session, payload: CreateItemInput) -> Item:
+    try:
+        item = _build_item(db, payload)
+        db.commit()
+        db.refresh(item)
+        return item
+    except Exception:
+        db.rollback()
+        raise
 
-    item = create_item(db, payload)
-    db.add(
-        ItemBlank(
-            item_id=item.id,
-            diameter_mm=payload.diameter_mm,
-            thickness_mm=payload.thickness_mm,
-            material_class_id=payload.material_class_id,
-            shade_id=payload.shade_id,
-            is_multilayer=payload.is_multilayer,
+
+def create_blank_item(db: Session, payload: CreateBlankItemInput) -> Item:
+    try:
+        if payload.item_type.strip().lower() != "blank":
+            raise ItemValidationError("Blank items must use item_type='blank'.")
+        if payload.diameter_mm <= 0 or payload.thickness_mm <= 0:
+            raise ItemValidationError("Blank dimensions must be positive.")
+        if not db.get(MaterialClass, payload.material_class_id):
+            raise ItemValidationError("Material class not found.")
+        if payload.shade_id is not None and not db.get(Shade, payload.shade_id):
+            raise ItemValidationError("Shade not found.")
+
+        item = _build_item(db, payload)
+        db.add(
+            ItemBlank(
+                item_id=item.id,
+                diameter_mm=payload.diameter_mm,
+                thickness_mm=payload.thickness_mm,
+                material_class_id=payload.material_class_id,
+                shade_id=payload.shade_id,
+                is_multilayer=payload.is_multilayer,
+            )
         )
-    )
-    db.commit()
-    db.refresh(item)
-    return item
+        db.commit()
+        db.refresh(item)
+        return item
+    except Exception:
+        db.rollback()
+        raise
 
 
 def create_ivobase_cartridge_item(db: Session, payload: CreateIvobaseCartridgeItemInput) -> Item:
-    if payload.item_type.strip().lower() != "ivobase_cartridge":
-        raise ItemValidationError("Ivobase cartridge items must use item_type='ivobase_cartridge'.")
-    if not payload.size_code.strip():
-        raise ItemValidationError("size_code is required.")
-    if not db.get(MaterialClass, payload.material_class_id):
-        raise ItemValidationError("Material class not found.")
-    if payload.shade_id is not None and not db.get(Shade, payload.shade_id):
-        raise ItemValidationError("Shade not found.")
+    try:
+        if payload.item_type.strip().lower() != "ivobase_cartridge":
+            raise ItemValidationError("Ivobase cartridge items must use item_type='ivobase_cartridge'.")
+        if not payload.size_code.strip():
+            raise ItemValidationError("size_code is required.")
+        if not db.get(MaterialClass, payload.material_class_id):
+            raise ItemValidationError("Material class not found.")
+        if payload.shade_id is not None and not db.get(Shade, payload.shade_id):
+            raise ItemValidationError("Shade not found.")
 
-    item = create_item(db, payload)
-    db.add(
-        ItemIvobaseCartridge(
-            item_id=item.id,
-            material_class_id=payload.material_class_id,
-            shade_id=payload.shade_id,
-            size_code=payload.size_code.strip(),
+        item = _build_item(db, payload)
+        db.add(
+            ItemIvobaseCartridge(
+                item_id=item.id,
+                material_class_id=payload.material_class_id,
+                shade_id=payload.shade_id,
+                size_code=payload.size_code.strip(),
+            )
         )
-    )
-    db.commit()
-    db.refresh(item)
-    return item
+        db.commit()
+        db.refresh(item)
+        return item
+    except Exception:
+        db.rollback()
+        raise
