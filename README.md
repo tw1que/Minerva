@@ -91,5 +91,6 @@ The startup bootstrap also seeds a minimal lookup set including `disc`, `ZIRCONI
   - `docker compose -f docker-compose.dev.yml run --rm api pytest -q`
   - `docker compose -f docker-compose.dev.yml up -d api`
   - `curl http://localhost:8000/api/health`
+  - `python scripts/manual_sanity.py`
 - Manual API sanity flow:
   - [docs/manual_api_sanity.md](docs/manual_api_sanity.md)

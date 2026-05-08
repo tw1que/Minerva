@@ -2,6 +2,14 @@
 
 This flow is backend-only and assumes the local API is available at `http://localhost:8000`.
 
+To run the same flow as a repeatable script after the API is up:
+
+```powershell
+python scripts/manual_sanity.py
+```
+
+The script defaults to `http://localhost:8000` and `admin` / `admin123`. Override those with `MINERVA_API_URL`, `MINERVA_ADMIN_USERNAME`, and `MINERVA_ADMIN_PASSWORD`.
+
 ## Clean start
 
 Run:
@@ -140,9 +148,9 @@ Verify:
   - `shade_code_snapshot`
 - `GET /api/stock/balances/lots` shows `qty_on_hand = 8` for that lot
 
-## Suggested one-shot verification approach
+## Scripted verification
 
-If you want to avoid manual JSON inspection, use a short Python script after the stack is up:
+The repository includes `scripts/manual_sanity.py` to avoid manual JSON inspection after the stack is up. It performs this flow through the live API:
 
 1. login
 2. fetch lookup ids
