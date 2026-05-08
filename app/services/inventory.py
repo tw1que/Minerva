@@ -85,153 +85,166 @@ class ConsumeStockInput:
 
 
 def receive_stock(db: Session, payload: ReceiveStockInput) -> tuple[Lot, StockMovement]:
-    if payload.quantity <= 0:
-        raise InventoryValidationError("Received quantity must be positive.")
-    if not payload.manufacturer_lot_code.strip():
-        raise InventoryValidationError("manufacturer_lot_code is required.")
+    try:
+        if payload.quantity <= 0:
+            raise InventoryValidationError("Received quantity must be positive.")
+        if not payload.manufacturer_lot_code.strip():
+            raise InventoryValidationError("manufacturer_lot_code is required.")
 
-    item = _get_item(db, payload.item_id)
-    reason = _get_reason(db, payload.movement_reason_id)
-    _enforce_reason_sign(reason, payload.quantity)
+        item = _get_item(db, payload.item_id)
+        reason = _get_reason(db, payload.movement_reason_id)
+        _enforce_reason_sign(reason, payload.quantity)
 
-    manufacturer_id = payload.manufacturer_id if payload.manufacturer_id is not None else item.manufacturer_id
-    material_class_id = _resolve_material_class_id(db, item, payload.material_class_id)
-    shade_id = _resolve_shade_id(db, item, payload.shade_id)
-    lot_code = (payload.lot_code or payload.manufacturer_lot_code).strip()
+        manufacturer_id = _resolve_manufacturer_id(db, item, payload.manufacturer_id)
+        material_class_id = _resolve_material_class_id(db, item, payload.material_class_id)
+        shade_id = _resolve_shade_id(db, item, payload.shade_id)
+        to_location = _get_location(db, payload.to_location_id)
+        lot_code = payload.lot_code.strip() if payload.lot_code and payload.lot_code.strip() else payload.manufacturer_lot_code.strip()
 
-    lot = Lot(
-        item_id=item.id,
-        manufacturer_id=manufacturer_id,
-        material_class_id=material_class_id,
-        shade_id=shade_id,
-        manufacturer_lot_code=payload.manufacturer_lot_code.strip(),
-        lot_code=lot_code,
-        instance_sku=_build_instance_sku(item.sku, lot_code),
-        received_at=payload.received_at or datetime.now(timezone.utc),
-        expires_at=payload.expires_at,
-        certificate_ref=payload.certificate_ref,
-        notes=payload.notes,
-        item_sku_snapshot=item.sku,
-        item_name_snapshot=item.name,
-        manufacturer_code_snapshot=_lookup_code(db, Manufacturer, manufacturer_id),
-        material_class_code_snapshot=_lookup_code(db, MaterialClass, material_class_id),
-        shade_code_snapshot=_lookup_code(db, Shade, shade_id),
-    )
-    db.add(lot)
-    db.flush()
+        lot = Lot(
+            item_id=item.id,
+            manufacturer_id=manufacturer_id,
+            material_class_id=material_class_id,
+            shade_id=shade_id,
+            manufacturer_lot_code=payload.manufacturer_lot_code.strip(),
+            lot_code=lot_code,
+            instance_sku=_build_instance_sku(item.sku, lot_code),
+            received_at=payload.received_at or datetime.now(timezone.utc),
+            expires_at=payload.expires_at,
+            certificate_ref=payload.certificate_ref,
+            notes=payload.notes,
+            item_sku_snapshot=item.sku,
+            item_name_snapshot=item.name,
+            manufacturer_code_snapshot=_lookup_code(db, Manufacturer, manufacturer_id),
+            material_class_code_snapshot=_lookup_code(db, MaterialClass, material_class_id),
+            shade_code_snapshot=_lookup_code(db, Shade, shade_id),
+        )
+        db.add(lot)
+        db.flush()
 
-    movement = _build_movement(
-        db=db,
-        item=item,
-        lot=lot,
-        qty_delta=payload.quantity,
-        movement_reason=reason,
-        from_location_id=None,
-        to_location_id=payload.to_location_id,
-        ref_type=payload.ref_type,
-        ref_id=payload.ref_id,
-        moved_by=payload.moved_by,
-        created_by=payload.created_by,
-        comment=payload.comment,
-    )
-    db.add(movement)
-    db.commit()
-    db.refresh(lot)
-    db.refresh(movement)
-    return lot, movement
+        movement = _build_movement(
+            item=item,
+            lot=lot,
+            qty_delta=payload.quantity,
+            movement_reason=reason,
+            from_location=None,
+            to_location=to_location,
+            ref_type=payload.ref_type,
+            ref_id=payload.ref_id,
+            moved_by=payload.moved_by,
+            created_by=payload.created_by,
+            comment=payload.comment,
+        )
+        db.add(movement)
+        db.commit()
+        db.refresh(lot)
+        db.refresh(movement)
+        return lot, movement
+    except Exception:
+        db.rollback()
+        raise
 
 
 def adjust_stock(db: Session, payload: AdjustStockInput) -> StockMovement:
-    if payload.qty_delta == 0:
-        raise InventoryValidationError("qty_delta must not be zero.")
-    if not payload.comment or not payload.comment.strip():
-        raise InventoryValidationError("comment is required for manual adjustments.")
+    try:
+        if payload.qty_delta == 0:
+            raise InventoryValidationError("qty_delta must not be zero.")
+        if not payload.comment or not payload.comment.strip():
+            raise InventoryValidationError("comment is required for manual adjustments.")
 
-    item = _get_item(db, payload.item_id)
-    reason = _get_reason(db, payload.movement_reason_id)
-    _enforce_reason_sign(reason, payload.qty_delta)
-    lot = _get_lot(db, payload.lot_id) if payload.lot_id is not None else None
-    if lot and lot.item_id != item.id:
-        raise InventoryValidationError("Lot does not belong to item.")
-    if payload.qty_delta < 0:
-        available = get_lot_balance(db, lot.id) if lot else get_item_balance(db, item.id)
-        if available + payload.qty_delta < 0:
-            raise InsufficientStockError("Adjustment would make stock negative.")
+        item = _get_item(db, payload.item_id)
+        reason = _get_reason(db, payload.movement_reason_id)
+        _enforce_reason_sign(reason, payload.qty_delta)
+        lot = _get_lot(db, payload.lot_id) if payload.lot_id is not None else None
+        from_location = _get_location(db, payload.from_location_id)
+        to_location = _get_location(db, payload.to_location_id)
+        if lot and lot.item_id != item.id:
+            raise InventoryValidationError("Lot does not belong to item.")
+        if payload.qty_delta < 0:
+            available = get_lot_balance(db, lot.id) if lot else get_item_balance(db, item.id)
+            if available + payload.qty_delta < 0:
+                raise InsufficientStockError("Adjustment would make stock negative.")
 
-    movement = _build_movement(
-        db=db,
-        item=item,
-        lot=lot,
-        qty_delta=payload.qty_delta,
-        movement_reason=reason,
-        from_location_id=payload.from_location_id,
-        to_location_id=payload.to_location_id,
-        ref_type=payload.ref_type,
-        ref_id=payload.ref_id,
-        moved_by=payload.moved_by,
-        created_by=payload.created_by,
-        comment=payload.comment.strip(),
-    )
-    db.add(movement)
-    db.commit()
-    db.refresh(movement)
-    return movement
+        movement = _build_movement(
+            item=item,
+            lot=lot,
+            qty_delta=payload.qty_delta,
+            movement_reason=reason,
+            from_location=from_location,
+            to_location=to_location,
+            ref_type=payload.ref_type,
+            ref_id=payload.ref_id,
+            moved_by=payload.moved_by,
+            created_by=payload.created_by,
+            comment=payload.comment.strip(),
+        )
+        db.add(movement)
+        db.commit()
+        db.refresh(movement)
+        return movement
+    except Exception:
+        db.rollback()
+        raise
 
 
 def consume_stock(db: Session, payload: ConsumeStockInput) -> tuple[StockMovement, OrderMaterial]:
-    if payload.quantity <= 0:
-        raise InventoryValidationError("Consumed quantity must be positive.")
+    try:
+        if payload.quantity <= 0:
+            raise InventoryValidationError("Consumed quantity must be positive.")
 
-    order = db.get(Order, payload.order_id)
-    if not order:
-        raise InventoryValidationError("Order not found.")
-    item = _get_item(db, payload.item_id)
-    lot = _get_lot(db, payload.lot_id)
-    if lot.item_id != item.id:
-        raise InventoryValidationError("Lot does not belong to item.")
-    reason = _get_reason(db, payload.movement_reason_id)
-    _enforce_reason_sign(reason, payload.quantity * Decimal("-1"))
-    if get_lot_balance(db, lot.id) < payload.quantity:
-        raise InsufficientStockError("Cannot consume more than current lot balance.")
+        order = db.get(Order, payload.order_id)
+        if not order:
+            raise InventoryValidationError("Order not found.")
+        item = _get_item(db, payload.item_id)
+        lot = _get_lot(db, payload.lot_id)
+        from_location = _get_location(db, payload.from_location_id)
+        if lot.item_id != item.id:
+            raise InventoryValidationError("Lot does not belong to item.")
+        reason = _get_reason(db, payload.movement_reason_id)
+        _enforce_reason_sign(reason, payload.quantity * Decimal("-1"))
+        if get_lot_balance(db, lot.id) < payload.quantity:
+            raise InsufficientStockError("Cannot consume more than current lot balance.")
 
-    movement = _build_movement(
-        db=db,
-        item=item,
-        lot=lot,
-        qty_delta=payload.quantity * Decimal("-1"),
-        movement_reason=reason,
-        from_location_id=payload.from_location_id,
-        to_location_id=None,
-        ref_type=payload.ref_type,
-        ref_id=payload.ref_id or str(order.id),
-        moved_by=payload.used_by,
-        created_by=payload.created_by,
-        comment=payload.comment,
-    )
-    db.add(movement)
-    db.flush()
+        movement = _build_movement(
+            item=item,
+            lot=lot,
+            qty_delta=payload.quantity * Decimal("-1"),
+            movement_reason=reason,
+            from_location=from_location,
+            to_location=None,
+            ref_type=payload.ref_type,
+            ref_id=payload.ref_id or str(order.id),
+            moved_by=payload.used_by,
+            created_by=payload.created_by,
+            comment=payload.comment,
+        )
+        db.add(movement)
+        db.flush()
 
-    order_material = OrderMaterial(
-        order_id=order.id,
-        item_id=item.id,
-        lot_id=lot.id,
-        qty_used=payload.quantity,
-        unit_id=item.unit_id,
-        unit_code_snapshot=item.unit.code,
-        item_sku_snapshot=lot.item_sku_snapshot,
-        item_name_snapshot=lot.item_name_snapshot,
-        lot_code_snapshot=lot.lot_code,
-        material_class_code_snapshot=lot.material_class_code_snapshot,
-        shade_code_snapshot=lot.shade_code_snapshot,
-        stock_movement_id=movement.id,
-        used_at=movement.moved_at,
-        used_by=payload.used_by,
-    )
-    db.add(order_material)
-    db.commit()
-    db.refresh(movement)
-    db.refresh(order_material)
-    return movement, order_material
+        order_material = OrderMaterial(
+            order_id=order.id,
+            item_id=item.id,
+            lot_id=lot.id,
+            qty_used=payload.quantity,
+            unit_id=item.unit_id,
+            unit_code_snapshot=item.unit.code,
+            item_sku_snapshot=lot.item_sku_snapshot,
+            item_name_snapshot=lot.item_name_snapshot,
+            lot_code_snapshot=lot.lot_code,
+            material_class_code_snapshot=lot.material_class_code_snapshot,
+            shade_code_snapshot=lot.shade_code_snapshot,
+            stock_movement_id=movement.id,
+            used_at=movement.moved_at,
+            used_by=payload.used_by,
+        )
+        db.add(order_material)
+        db.commit()
+        db.refresh(movement)
+        db.refresh(order_material)
+        return movement, order_material
+    except Exception:
+        db.rollback()
+        raise
 
 
 def get_lot_balance(db: Session, lot_id: int) -> Decimal:
@@ -268,13 +281,12 @@ def list_item_balances(db: Session) -> list[tuple[int, Decimal]]:
 
 
 def _build_movement(
-    db: Session,
     item: Item,
     lot: Lot | None,
     qty_delta: Decimal,
     movement_reason: MovementReason,
-    from_location_id: int | None,
-    to_location_id: int | None,
+    from_location: StockLocation | None,
+    to_location: StockLocation | None,
     ref_type: str | None,
     ref_id: str | None,
     moved_by: str | None,
@@ -289,10 +301,10 @@ def _build_movement(
         unit_code_snapshot=item.unit.code,
         movement_reason_id=movement_reason.id,
         movement_reason_code_snapshot=movement_reason.code,
-        from_location_id=from_location_id,
-        from_location_code_snapshot=_lookup_code(db, StockLocation, from_location_id),
-        to_location_id=to_location_id,
-        to_location_code_snapshot=_lookup_code(db, StockLocation, to_location_id),
+        from_location_id=from_location.id if from_location else None,
+        from_location_code_snapshot=from_location.code if from_location else None,
+        to_location_id=to_location.id if to_location else None,
+        to_location_code_snapshot=to_location.code if to_location else None,
         ref_type=ref_type,
         ref_id=ref_id,
         moved_by=moved_by,
@@ -322,6 +334,15 @@ def _get_reason(db: Session, movement_reason_id: int) -> MovementReason:
     if not reason:
         raise InventoryValidationError("Movement reason not found.")
     return reason
+
+
+def _get_location(db: Session, location_id: int | None) -> StockLocation | None:
+    if location_id is None:
+        return None
+    location = db.get(StockLocation, location_id)
+    if not location:
+        raise InventoryValidationError("Stock location not found.")
+    return location
 
 
 def _enforce_reason_sign(reason: MovementReason, qty_delta: Decimal) -> None:
@@ -367,3 +388,10 @@ def _lookup_code(db: Session, model, row_id: int | None) -> str | None:
 
 def _build_instance_sku(item_sku: str, lot_code: str) -> str:
     return f"{item_sku}:{lot_code.strip()}"
+
+
+def _resolve_manufacturer_id(db: Session, item: Item, explicit_id: int | None) -> int | None:
+    manufacturer_id = explicit_id if explicit_id is not None else item.manufacturer_id
+    if manufacturer_id is not None and not db.get(Manufacturer, manufacturer_id):
+        raise InventoryValidationError("Manufacturer not found.")
+    return manufacturer_id
