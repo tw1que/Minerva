@@ -23,7 +23,7 @@ services:
     environment:
       APP_ENV: dev
       DATABASE_URL: postgresql+psycopg://minerva:minerva@db:5432/minerva
-      AUTO_CREATE_DB: "true"
+      AUTO_CREATE_DB: "false"
     volumes:
       - .:/app
     ports:
